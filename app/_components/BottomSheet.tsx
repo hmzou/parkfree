@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   TextInput,
   Switch,
-  ScrollView,
   ActivityIndicator,
 } from 'react-native';
 import RNBottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
@@ -16,11 +15,34 @@ import { t } from '../_i18n';
 import { nearestFreeSpots, haversineMeters } from '../_services/overpass';
 import { DirectionsModal } from './DirectionsModal';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Parse OSM maxstay strings like "Max 2h", "Max 30 min" → minutes, or null. */
+function parseMaxstayMinutes(restrictions: string | null): number | null {
+  if (!restrictions) return null;
+  const s = restrictions.toLowerCase();
+  const hMatch = s.match(/(\d+)\s*h/);
+  if (hMatch) {
+    const hours = parseInt(hMatch[1], 10);
+    const mMatch = s.match(/(\d+)\s*h.*?(\d+)\s*m/);
+    const extraMins = mMatch ? parseInt(mMatch[2], 10) : 0;
+    return hours * 60 + extraMins;
+  }
+  const mMatch = s.match(/(\d+)\s*m(?:in)?/);
+  if (mMatch) return parseInt(mMatch[1], 10);
+  return null;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 interface Props {
   spot: ParkingSpot | null;
   allSpots: ParkingSpot[];
   userLat: number;
   userLng: number;
+  /** True once the user has tapped the same pin a second time (or "See options"). */
+  expanded: boolean;
+  onExpand: () => void;
   onParkHere: (timerMinutes?: number, warnMinutes?: number) => Promise<void>;
   onClose: () => void;
   sessionActive: boolean;
@@ -31,12 +53,14 @@ export const SpotBottomSheet: React.FC<Props> = ({
   allSpots,
   userLat,
   userLng,
+  expanded,
+  onExpand,
   onParkHere,
   onClose,
   sessionActive,
 }) => {
   const sheetRef = useRef<RNBottomSheet>(null);
-  const snapPoints = ['40%', '80%'];
+  const snapPoints = ['42%', '82%'];
 
   const [directionsVisible, setDirectionsVisible] = useState(false);
   const [timerEnabled, setTimerEnabled] = useState(false);
@@ -45,18 +69,35 @@ export const SpotBottomSheet: React.FC<Props> = ({
   const [warnMins, setWarnMins] = useState('10');
   const [parking, setParking] = useState(false);
 
+  // Open/close sheet and reset local state whenever the selected spot changes.
+  // Also auto-populate timer from known OSM time restrictions.
   useEffect(() => {
     if (spot) {
       sheetRef.current?.snapToIndex(0);
-      setTimerEnabled(false);
-      setTimerHours('0');
-      setTimerMins('30');
-      setWarnMins('10');
       setParking(false);
+      setWarnMins('10');
+
+      const parsedMins = parseMaxstayMinutes(spot.timeRestrictions);
+      if (parsedMins !== null && parsedMins > 0) {
+        setTimerEnabled(true);
+        setTimerHours(String(Math.floor(parsedMins / 60)));
+        setTimerMins(String(parsedMins % 60));
+      } else {
+        setTimerEnabled(false);
+        setTimerHours('0');
+        setTimerMins('30');
+      }
     } else {
       sheetRef.current?.close();
     }
   }, [spot?.id]);
+
+  // Snap to full height when the user expands the sheet to see actions.
+  useEffect(() => {
+    if (expanded && spot) {
+      sheetRef.current?.snapToIndex(1);
+    }
+  }, [expanded, spot?.id]);
 
   const handleParkHere = useCallback(async () => {
     setParking(true);
@@ -79,6 +120,12 @@ export const SpotBottomSheet: React.FC<Props> = ({
   const occupiedMinsAgo = spot?.occupiedSince
     ? Math.floor((Date.now() - spot.occupiedSince.getTime()) / 60_000)
     : null;
+
+  // Distance from user to this spot — drives the "I'm Parking Here" button state.
+  const distanceMeters = spot
+    ? haversineMeters(userLat, userLng, spot.lat, spot.lng)
+    : Infinity;
+  const canPark = distanceMeters <= 150;
 
   if (!spot) return null;
 
@@ -103,7 +150,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
         handleIndicatorStyle={styles.handle}
       >
         <BottomSheetScrollView contentContainerStyle={styles.content}>
-          {/* Header */}
+          {/* ── Header ─────────────────────────────────────────────────── */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <Text style={styles.title}>
@@ -120,7 +167,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
             </View>
           </View>
 
-          {/* Seasonal ban warning */}
+          {/* ── Seasonal ban warning ────────────────────────────────────── */}
           {spot.seasonalBan && (
             <View style={styles.warningBanner}>
               <Ionicons name="warning" size={18} color="#FF6D00" />
@@ -128,7 +175,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
             </View>
           )}
 
-          {/* Restrictions */}
+          {/* ── Restrictions ─────────────────────────────────────────────── */}
           <View style={styles.infoRow}>
             <Ionicons name="time-outline" size={18} color="#AAA" />
             <Text style={styles.infoLabel}>{t('spot.restrictions')}:</Text>
@@ -137,7 +184,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
             </Text>
           </View>
 
-          {/* User submitted */}
+          {/* ── User submitted ───────────────────────────────────────────── */}
           {spot.source === 'user' && (
             <View style={styles.infoRow}>
               <Ionicons name="person-outline" size={16} color="#AAA" />
@@ -145,14 +192,14 @@ export const SpotBottomSheet: React.FC<Props> = ({
             </View>
           )}
 
-          {/* Occupied state */}
+          {/* ── Occupied ago ─────────────────────────────────────────────── */}
           {spot.occupied && occupiedMinsAgo !== null && (
             <Text style={styles.occupiedAgo}>
               {t('spot.occupiedAgo', { minutes: occupiedMinsAgo })}
             </Text>
           )}
 
-          {/* Nearby free spots when occupied */}
+          {/* ── Nearby free spots ────────────────────────────────────────── */}
           {spot.occupied && nearby.length > 0 && (
             <View style={styles.nearbySection}>
               <Text style={styles.nearbyTitle}>{t('spot.nearbySpots')}</Text>
@@ -171,92 +218,115 @@ export const SpotBottomSheet: React.FC<Props> = ({
             </View>
           )}
 
-          {/* Timer setup (only when not occupied + no active session) */}
-          {!spot.occupied && !sessionActive && (
-            <View style={styles.timerSection}>
-              <View style={styles.timerHeader}>
-                <Text style={styles.timerLabel}>{t('session.setTimer')}</Text>
-                <Switch
-                  value={timerEnabled}
-                  onValueChange={setTimerEnabled}
-                  trackColor={{ false: '#333', true: '#00C853' }}
-                  thumbColor="#fff"
-                />
-              </View>
-
-              {timerEnabled && (
-                <View style={styles.timerInputs}>
-                  <View style={styles.timerField}>
-                    <Text style={styles.timerFieldLabel}>{t('session.hours')}</Text>
-                    <TextInput
-                      style={styles.timerInput}
-                      keyboardType="number-pad"
-                      value={timerHours}
-                      onChangeText={setTimerHours}
-                      maxLength={2}
-                      placeholderTextColor="#666"
-                    />
-                  </View>
-                  <Text style={styles.timerColon}>:</Text>
-                  <View style={styles.timerField}>
-                    <Text style={styles.timerFieldLabel}>{t('session.minutes')}</Text>
-                    <TextInput
-                      style={styles.timerInput}
-                      keyboardType="number-pad"
-                      value={timerMins}
-                      onChangeText={setTimerMins}
-                      maxLength={2}
-                      placeholderTextColor="#666"
-                    />
-                  </View>
-                </View>
-              )}
-
-              {timerEnabled && (
-                <View style={styles.warnRow}>
-                  <Ionicons name="notifications-outline" size={16} color="#AAA" />
-                  <Text style={styles.warnText}>
-                    {t('session.warnBefore', { minutes: warnMins })}
-                  </Text>
-                  <TextInput
-                    style={styles.warnInput}
-                    keyboardType="number-pad"
-                    value={warnMins}
-                    onChangeText={setWarnMins}
-                    maxLength={2}
-                  />
-                  <Text style={styles.warnText}> min</Text>
-                </View>
-              )}
-            </View>
+          {/* ── Compact "See options" row — only visible before expansion ── */}
+          {!expanded && (
+            <TouchableOpacity style={styles.seeOptionsBtn} onPress={onExpand} activeOpacity={0.75}>
+              <Text style={styles.seeOptionsBtnText}>See options</Text>
+              <Ionicons name="chevron-down" size={16} color="#00C853" />
+            </TouchableOpacity>
           )}
 
-          {/* Actions */}
-          <View style={styles.actions}>
-            {!spot.occupied && !sessionActive && (
-              <TouchableOpacity
-                style={[styles.primaryBtn, parking && styles.primaryBtnDisabled]}
-                onPress={handleParkHere}
-                disabled={parking}
-                activeOpacity={0.8}
-              >
-                {parking
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <Ionicons name="car" size={20} color="#fff" />
-                }
-                <Text style={styles.primaryBtnText}>{t('actions.parkHere')}</Text>
-              </TouchableOpacity>
-            )}
+          {/* ── Expanded area — timer + actions ─────────────────────────── */}
+          {expanded && (
+            <>
+              {/* Timer setup (only when not occupied + no active session) */}
+              {!spot.occupied && !sessionActive && (
+                <View style={styles.timerSection}>
+                  <View style={styles.timerHeader}>
+                    <Text style={styles.timerLabel}>{t('session.setTimer')}</Text>
+                    <Switch
+                      value={timerEnabled}
+                      onValueChange={setTimerEnabled}
+                      trackColor={{ false: '#333', true: '#00C853' }}
+                      thumbColor="#fff"
+                    />
+                  </View>
 
-            <TouchableOpacity
-              style={styles.secondaryBtn}
-              onPress={() => setDirectionsVisible(true)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="navigate-outline" size={20} color="#00C853" />
-              <Text style={styles.secondaryBtnText}>{t('actions.getDirections')}</Text>
-            </TouchableOpacity>
-          </View>
+                  {timerEnabled && (
+                    <View style={styles.timerInputs}>
+                      <View style={styles.timerField}>
+                        <Text style={styles.timerFieldLabel}>{t('session.hours')}</Text>
+                        <TextInput
+                          style={styles.timerInput}
+                          keyboardType="number-pad"
+                          value={timerHours}
+                          onChangeText={setTimerHours}
+                          maxLength={2}
+                          placeholderTextColor="#666"
+                        />
+                      </View>
+                      <Text style={styles.timerColon}>:</Text>
+                      <View style={styles.timerField}>
+                        <Text style={styles.timerFieldLabel}>{t('session.minutes')}</Text>
+                        <TextInput
+                          style={styles.timerInput}
+                          keyboardType="number-pad"
+                          value={timerMins}
+                          onChangeText={setTimerMins}
+                          maxLength={2}
+                          placeholderTextColor="#666"
+                        />
+                      </View>
+                    </View>
+                  )}
+
+                  {timerEnabled && (
+                    <View style={styles.warnRow}>
+                      <Ionicons name="notifications-outline" size={16} color="#AAA" />
+                      <Text style={styles.warnText}>
+                        {t('session.warnBefore', { minutes: warnMins })}
+                      </Text>
+                      <TextInput
+                        style={styles.warnInput}
+                        keyboardType="number-pad"
+                        value={warnMins}
+                        onChangeText={setWarnMins}
+                        maxLength={2}
+                      />
+                      <Text style={styles.warnText}> min</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* Actions */}
+              <View style={styles.actions}>
+                {/* "I'm Parking Here" — gated on proximity */}
+                {!spot.occupied && !sessionActive && (
+                  canPark ? (
+                    <TouchableOpacity
+                      style={[styles.primaryBtn, parking && styles.primaryBtnDisabled]}
+                      onPress={handleParkHere}
+                      disabled={parking}
+                      activeOpacity={0.8}
+                    >
+                      {parking
+                        ? <ActivityIndicator color="#fff" size="small" />
+                        : <Ionicons name="car" size={20} color="#fff" />
+                      }
+                      <Text style={styles.primaryBtnText}>{t('actions.parkHere')}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.tooFarRow}>
+                      <Ionicons name="location-outline" size={16} color="#666" />
+                      <Text style={styles.tooFarText}>
+                        {Math.round(distanceMeters)}m away — get closer to park here
+                      </Text>
+                    </View>
+                  )
+                )}
+
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={() => setDirectionsVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="navigate-outline" size={20} color="#00C853" />
+                  <Text style={styles.secondaryBtnText}>{t('actions.getDirections')}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </BottomSheetScrollView>
       </RNBottomSheet>
 
@@ -376,6 +446,24 @@ const styles = StyleSheet.create({
     color: '#CCC',
     fontSize: 13,
   },
+  // ── Compact "See options" button ──────────────────────────────────────────
+  seeOptionsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,200,83,0.3)',
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,200,83,0.06)',
+  },
+  seeOptionsBtnText: {
+    color: '#00C853',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  // ── Timer section ─────────────────────────────────────────────────────────
   timerSection: {
     backgroundColor: '#111',
     borderRadius: 12,
@@ -445,6 +533,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#333',
   },
+  // ── Actions ───────────────────────────────────────────────────────────────
   actions: {
     gap: 10,
     marginTop: 4,
@@ -465,6 +554,21 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  tooFarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  tooFarText: {
+    color: '#666',
+    fontSize: 14,
   },
   secondaryBtn: {
     backgroundColor: 'rgba(0,200,83,0.1)',

@@ -33,6 +33,8 @@ export default function MapScreen() {
   const { timer, startTimer, stopTimer } = useTimer();
 
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpot | null>(null);
+  // expandedSpotId tracks which spot has had its action buttons revealed (second tap / "See options").
+  const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
   const [addSpotVisible, setAddSpotVisible] = useState(false);
   const [addSpotCoord, setAddSpotCoord] = useState<Coordinate | null>(null);
 
@@ -63,12 +65,26 @@ export default function MapScreen() {
   ]);
 
   const handleSpotPress = useCallback((spot: ParkingSpot) => {
-    setSelectedSpot(spot);
+    setSelectedSpot(prev => {
+      if (prev?.id === spot.id) {
+        // Second tap on the same pin → expand to show action buttons
+        setExpandedSpotId(spot.id);
+        return prev;
+      }
+      // First tap on a new pin → show compact card, reset expansion
+      setExpandedSpotId(null);
+      return spot;
+    });
   }, []);
 
   const handleSheetClose = useCallback(() => {
     setSelectedSpot(null);
+    setExpandedSpotId(null);
   }, []);
+
+  const handleExpand = useCallback(() => {
+    setExpandedSpotId(selectedSpot?.id ?? null);
+  }, [selectedSpot?.id]);
 
   const handleParkHere = useCallback(
     async (timerMinutes?: number, warnMinutes = 10) => {
@@ -85,6 +101,7 @@ export default function MapScreen() {
           startTimer(timerMinutes, warnMinutes);
         }
         setSelectedSpot(null);
+        setExpandedSpotId(null);
       } catch {
         Alert.alert(t('errors.sessionFailed'), t('errors.retry'));
       }
@@ -208,6 +225,8 @@ export default function MapScreen() {
           allSpots={spots}
           userLat={coordinate.latitude}
           userLng={coordinate.longitude}
+          expanded={expandedSpotId === selectedSpot?.id}
+          onExpand={handleExpand}
           onParkHere={handleParkHere}
           onClose={handleSheetClose}
           sessionActive={!!session}
