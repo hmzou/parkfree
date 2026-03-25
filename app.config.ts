@@ -45,6 +45,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-dev-client',
     'expo-localization',
     [
+      'expo-build-properties',
+      {
+        android: {
+          gradleVersion: '8.3',
+          kotlinVersion: '1.9.24',
+        },
+      },
+    ],
+    [
       'expo-notifications',
       {
         icon: './assets/notification-icon.png',
