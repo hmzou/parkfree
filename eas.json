@@ -7,25 +7,14 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "prebuildCommand": "echo 'Using committed android directory with Gradle 8.3 - skipping default prebuild'",
-      "android": {
-        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
-      },
       "ios": {
         "simulator": false
       }
     },
     "preview": {
-      "distribution": "internal",
-      "android": {
-        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
-      }
+      "distribution": "internal"
     },
-    "production": {
-      "android": {
-        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
-      }
-    }
+    "production": {}
   },
   "submit": {}
 }

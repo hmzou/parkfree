@@ -44,15 +44,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-router',
     'expo-dev-client',
     'expo-localization',
-    './plugins/withGradle83',
-    [
-      'expo-build-properties',
-      {
-        android: {
-          kotlinVersion: '1.9.24',
-        },
-      },
-    ],
     [
       'expo-notifications',
       {
