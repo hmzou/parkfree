@@ -1,0 +1,137 @@
+import { useState, useEffect, useCallback } from 'react';
+import { ParkingSession } from '../types';
+import {
+  ensureAnonymousAuth,
+  startSession,
+  endSession,
+  getActiveSession,
+  markSpotOccupied,
+  markSpotFree,
+  subscribeToAuthState,
+} from '../services/firebase';
+import {
+  requestNotificationPermissions,
+  scheduleWarningNotification,
+  scheduleExpiryNotification,
+  cancelAllNotifications,
+} from '../services/notifications';
+import { getLocale } from '../i18n';
+
+interface UseSessionResult {
+  userId: string | null;
+  session: ParkingSession | null;
+  startParking: (
+    spotId: string,
+    lat: number,
+    lng: number,
+    timerMinutes?: number,
+    warnMinutes?: number,
+  ) => Promise<void>;
+  stopParking: () => Promise<void>;
+  loading: boolean;
+}
+
+export function useSession(): UseSessionResult {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [session, setSession] = useState<ParkingSession | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Init auth + restore active session
+  useEffect(() => {
+    const unsub = subscribeToAuthState(async (user) => {
+      if (user) {
+        setUserId(user.uid);
+        const active = await getActiveSession(user.uid);
+        setSession(active);
+      } else {
+        // Sign in anonymously
+        const authed = await ensureAnonymousAuth();
+        setUserId(authed.uid);
+        const active = await getActiveSession(authed.uid);
+        setSession(active);
+      }
+    });
+
+    return unsub;
+  }, []);
+
+  const startParking = useCallback(
+    async (
+      spotId: string,
+      lat: number,
+      lng: number,
+      timerMinutes?: number,
+      warnMinutes = 10,
+    ) => {
+      setLoading(true);
+      try {
+        const user = await ensureAnonymousAuth();
+
+        await markSpotOccupied(spotId, user.uid);
+
+        const sessionId = await startSession(
+          spotId,
+          user.uid,
+          lat,
+          lng,
+          timerMinutes,
+          warnMinutes,
+        );
+
+        const now = new Date();
+        const newSession: ParkingSession = {
+          id: sessionId,
+          spotId,
+          userId: user.uid,
+          lat,
+          lng,
+          startTime: now,
+          endTime: null,
+          active: true,
+          timerMinutes,
+          warnMinutes,
+        };
+        setSession(newSession);
+
+        // Schedule notifications if timer is set
+        if (timerMinutes && timerMinutes > 0) {
+          const hasPerms = await requestNotificationPermissions();
+          if (hasPerms) {
+            const locale = getLocale();
+            const expiryDate = new Date(now.getTime() + timerMinutes * 60 * 1000);
+            const warnDate = new Date(expiryDate.getTime() - warnMinutes * 60 * 1000);
+
+            if (warnDate > now) {
+              await scheduleWarningNotification(warnDate, warnMinutes, spotId, locale);
+            }
+            await scheduleExpiryNotification(expiryDate, spotId, locale);
+          }
+        }
+      } catch (err) {
+        console.error('startParking error:', err);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  const stopParking = useCallback(async () => {
+    if (!session) return;
+    setLoading(true);
+    try {
+      await markSpotFree(session.spotId);
+      await endSession(session.id);
+      await cancelAllNotifications();
+      setSession(null);
+    } catch (err) {
+      console.error('stopParking error:', err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [session]);
+
+  return { userId, session, startParking, stopParking, loading };
+}

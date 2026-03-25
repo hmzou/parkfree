@@ -1,0 +1,103 @@
+{
+  "appName": "ParkFree",
+  "tabs": {
+    "map": "Carte",
+    "profile": "Profil"
+  },
+  "map": {
+    "title": "Stationnement gratuit",
+    "searchingLocation": "Recherche de votre position…",
+    "locationDenied": "Accès à la localisation refusé",
+    "locationDeniedMessage": "ParkFree a besoin de votre position pour trouver un stationnement gratuit à proximité. Veuillez l'activer dans les Paramètres.",
+    "openSettings": "Ouvrir les paramètres",
+    "loadingSpots": "Chargement des places de stationnement…",
+    "noSpotsFound": "Aucune place gratuite trouvée à proximité",
+    "addSpot": "Ajouter une place",
+    "refreshing": "Mise à jour…"
+  },
+  "spot": {
+    "free": "Stationnement gratuit",
+    "occupied": "Occupé",
+    "available": "Disponible",
+    "timeLimited": "Durée limitée",
+    "seasonalBan": "Interdiction saisonnière",
+    "street": "Stationnement sur rue",
+    "lot": "Terrain de stationnement",
+    "garage": "Garage de stationnement",
+    "restrictions": "Restrictions",
+    "none": "Aucune",
+    "occupiedAgo": "Occupé il y a %{minutes} min",
+    "nearbySpots": "3 places libres les plus proches",
+    "userSubmitted": "Place communautaire",
+    "pendingVerification": "En attente de vérification",
+    "ottawa": "Ottawa",
+    "gatineau": "Gatineau"
+  },
+  "actions": {
+    "parkHere": "Je me stationne ici",
+    "leaving": "Je pars",
+    "getDirections": "Obtenir l'itinéraire",
+    "cancel": "Annuler",
+    "confirm": "Confirmer",
+    "close": "Fermer",
+    "submit": "Soumettre"
+  },
+  "session": {
+    "parkedAt": "Stationné à",
+    "timer": "Minuterie",
+    "setTimer": "Définir une minuterie",
+    "hours": "Heures",
+    "minutes": "Minutes",
+    "warnBefore": "M'avertir %{minutes} min avant",
+    "noTimer": "Pas de minuterie",
+    "timeUp": "Temps écoulé !",
+    "timeRemaining": "%{minutes}m %{seconds}s restant",
+    "expired": "Temps de stationnement expiré",
+    "expiredMessage": "Votre minuterie de stationnement a expiré à %{spot}.",
+    "warningTitle": "Stationnement bientôt expiré",
+    "warningMessage": "Votre stationnement expire dans %{minutes} minutes."
+  },
+  "directions": {
+    "title": "Obtenir l'itinéraire",
+    "subtitle": "Ouvrir dans votre application de navigation",
+    "googleMaps": "Google Maps",
+    "waze": "Waze",
+    "appleMaps": "Plans",
+    "noApps": "Aucune application de navigation trouvée"
+  },
+  "addSpot": {
+    "title": "Ajouter une place",
+    "subtitle": "Aidez la communauté d'Ottawa/Gatineau",
+    "type": "Type de place",
+    "street": "Rue",
+    "lot": "Terrain",
+    "garage": "Garage",
+    "restrictions": "Restrictions de durée (optionnel)",
+    "restrictionsPlaceholder": "ex. 2h lun–ven 8h–18h",
+    "notes": "Notes (optionnel)",
+    "notesPlaceholder": "Décrivez la place, le repère, etc.",
+    "submitting": "Envoi en cours…",
+    "submitted": "Place soumise !",
+    "submittedMessage": "Merci ! Votre place apparaîtra sur la carte après vérification.",
+    "longPressHint": "Appui long sur la carte pour placer une place"
+  },
+  "profile": {
+    "title": "Profil",
+    "session": "Session anonyme",
+    "sessionId": "ID de session",
+    "language": "Langue",
+    "english": "English",
+    "french": "Français",
+    "about": "À propos",
+    "version": "Version",
+    "openSource": "Données des contributeurs OpenStreetMap",
+    "spotsSubmitted": "Places soumises",
+    "sessionsParked": "Sessions de stationnement"
+  },
+  "errors": {
+    "fetchFailed": "Impossible de charger les places",
+    "sessionFailed": "Impossible de démarrer la session",
+    "submitFailed": "Impossible de soumettre la place",
+    "retry": "Réessayer"
+  }
+}

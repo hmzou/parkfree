@@ -1,0 +1,103 @@
+{
+  "appName": "ParkFree",
+  "tabs": {
+    "map": "Map",
+    "profile": "Profile"
+  },
+  "map": {
+    "title": "Free Parking",
+    "searchingLocation": "Finding your location…",
+    "locationDenied": "Location access denied",
+    "locationDeniedMessage": "ParkFree needs your location to find free parking nearby. Please enable it in Settings.",
+    "openSettings": "Open Settings",
+    "loadingSpots": "Loading parking spots…",
+    "noSpotsFound": "No free spots found nearby",
+    "addSpot": "Add a spot",
+    "refreshing": "Refreshing spots…"
+  },
+  "spot": {
+    "free": "Free Parking",
+    "occupied": "Occupied",
+    "available": "Available",
+    "timeLimited": "Time Limited",
+    "seasonalBan": "Seasonal ban",
+    "street": "Street parking",
+    "lot": "Parking lot",
+    "garage": "Parking garage",
+    "restrictions": "Restrictions",
+    "none": "None",
+    "occupiedAgo": "Occupied %{minutes} min ago",
+    "nearbySpots": "3 nearest free spots",
+    "userSubmitted": "Community spot",
+    "pendingVerification": "Pending verification",
+    "ottawa": "Ottawa",
+    "gatineau": "Gatineau"
+  },
+  "actions": {
+    "parkHere": "I'm Parking Here",
+    "leaving": "I'm Leaving",
+    "getDirections": "Get Directions",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "close": "Close",
+    "submit": "Submit"
+  },
+  "session": {
+    "parkedAt": "Parked at",
+    "timer": "Timer",
+    "setTimer": "Set a timer",
+    "hours": "Hours",
+    "minutes": "Minutes",
+    "warnBefore": "Warn me %{minutes} min before",
+    "noTimer": "No timer",
+    "timeUp": "Time's up!",
+    "timeRemaining": "%{minutes}m %{seconds}s remaining",
+    "expired": "Parking time expired",
+    "expiredMessage": "Your parking timer has expired at %{spot}.",
+    "warningTitle": "Parking expiring soon",
+    "warningMessage": "Your parking expires in %{minutes} minutes."
+  },
+  "directions": {
+    "title": "Get Directions",
+    "subtitle": "Open in your navigation app",
+    "googleMaps": "Google Maps",
+    "waze": "Waze",
+    "appleMaps": "Apple Maps",
+    "noApps": "No navigation apps found"
+  },
+  "addSpot": {
+    "title": "Add a spot",
+    "subtitle": "Help the Ottawa/Gatineau community",
+    "type": "Spot type",
+    "street": "Street",
+    "lot": "Lot",
+    "garage": "Garage",
+    "restrictions": "Time restrictions (optional)",
+    "restrictionsPlaceholder": "e.g. 2h Mon–Fri 8am–6pm",
+    "notes": "Notes (optional)",
+    "notesPlaceholder": "Describe the spot, landmark, etc.",
+    "submitting": "Submitting…",
+    "submitted": "Spot submitted!",
+    "submittedMessage": "Thank you! Your spot will appear on the map after review.",
+    "longPressHint": "Long press the map to place a spot"
+  },
+  "profile": {
+    "title": "Profile",
+    "session": "Anonymous Session",
+    "sessionId": "Session ID",
+    "language": "Language",
+    "english": "English",
+    "french": "Français",
+    "about": "About",
+    "version": "Version",
+    "openSource": "Data from OpenStreetMap contributors",
+    "spotsSubmitted": "Spots submitted",
+    "sessionsParked": "Sessions parked"
+  },
+  "errors": {
+    "fetchFailed": "Could not load parking spots",
+    "sessionFailed": "Could not start session",
+    "submitFailed": "Could not submit spot",
+    "retry": "Retry"
+  }
+}
