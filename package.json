@@ -11,7 +11,6 @@
   "dependencies": {
     "@expo/vector-icons": "^14.0.0",
     "@gorhom/bottom-sheet": "^4.6.4",
-    "@react-native-firebase/app": "^20.0.0",
     "@rnmapbox/maps": "10.1.45",
     "expo": "~51.0.28",
     "expo-constants": "~16.0.2",
