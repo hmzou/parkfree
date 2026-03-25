@@ -21,6 +21,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         'ParkFree needs your location to find free parking near you.',
       NSLocationAlwaysAndWhenInUseUsageDescription:
         'ParkFree needs your location to notify you when your parking timer expires.',
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {
