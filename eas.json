@@ -7,14 +7,24 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "android": {
+        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
+      },
       "ios": {
         "simulator": false
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
+      }
     },
-    "production": {}
+    "production": {
+      "android": {
+        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
+      }
+    }
   },
   "submit": {}
 }
