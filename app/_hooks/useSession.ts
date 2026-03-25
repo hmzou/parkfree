@@ -13,6 +13,7 @@ import {
   requestNotificationPermissions,
   scheduleWarningNotification,
   scheduleExpiryNotification,
+  scheduleStillParkedReminder,
   cancelAllNotifications,
 } from '../_services/notifications';
 import { getLocale } from '../_i18n';
@@ -26,6 +27,8 @@ interface UseSessionResult {
     lng: number,
     timerMinutes?: number,
     warnMinutes?: number,
+    spotType?: string,
+    spotCity?: string,
   ) => Promise<void>;
   stopParking: () => Promise<void>;
   loading: boolean;
@@ -62,6 +65,8 @@ export function useSession(): UseSessionResult {
       lng: number,
       timerMinutes?: number,
       warnMinutes = 10,
+      spotType?: string,
+      spotCity?: string,
     ) => {
       setLoading(true);
       try {
@@ -76,6 +81,8 @@ export function useSession(): UseSessionResult {
           lng,
           timerMinutes,
           warnMinutes,
+          spotType,
+          spotCity,
         );
 
         const now = new Date();
@@ -90,21 +97,29 @@ export function useSession(): UseSessionResult {
           active: true,
           timerMinutes,
           warnMinutes,
+          spotType,
+          spotCity,
         };
         setSession(newSession);
 
-        // Schedule notifications if timer is set
-        if (timerMinutes && timerMinutes > 0) {
-          const hasPerms = await requestNotificationPermissions();
-          if (hasPerms) {
-            const locale = getLocale();
+        const hasPerms = await requestNotificationPermissions();
+        if (hasPerms) {
+          const locale = getLocale();
+          const spotLabel = `${spotType ?? 'Street parking'} — ${spotCity ?? 'Ottawa'}`;
+
+          if (timerMinutes && timerMinutes > 0) {
+            // Timer-based notifications: warning + expiry
             const expiryDate = new Date(now.getTime() + timerMinutes * 60 * 1000);
             const warnDate = new Date(expiryDate.getTime() - warnMinutes * 60 * 1000);
 
             if (warnDate > now) {
-              await scheduleWarningNotification(warnDate, warnMinutes, spotId, locale);
+              await scheduleWarningNotification(warnDate, warnMinutes, spotLabel, locale);
             }
-            await scheduleExpiryNotification(expiryDate, spotId, locale);
+            await scheduleExpiryNotification(expiryDate, spotLabel, locale);
+          } else {
+            // No timer: remind after 3 hours
+            const reminderDate = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+            await scheduleStillParkedReminder(reminderDate, spotLabel, locale);
           }
         }
       } catch (err) {

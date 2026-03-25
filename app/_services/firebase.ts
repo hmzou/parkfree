@@ -26,9 +26,10 @@ import {
   getDocs,
   DocumentData,
   QuerySnapshot,
+  limit,
 } from 'firebase/firestore';
 import Constants from 'expo-constants';
-import { ParkingSpot, ParkingSession, UserSpotSubmission, SpotType } from '../_types';
+import { ParkingSpot, ParkingSession, UserSpotSubmission, SpotType, OccupancyReport } from '../_types';
 
 /**
  * Use AsyncStorage-backed auth when the native module exists (current dev/release build).
@@ -212,6 +213,8 @@ export async function startSession(
   lng: number,
   timerMinutes?: number,
   warnMinutes?: number,
+  spotType?: string,
+  spotCity?: string,
 ): Promise<string> {
   const ref = await addDoc(collection(db, 'sessions'), {
     spotId,
@@ -223,6 +226,9 @@ export async function startSession(
     active: true,
     timerMinutes: timerMinutes ?? null,
     warnMinutes: warnMinutes ?? 10,
+    spotType: spotType ?? 'street',
+    spotCity: spotCity ?? 'Unknown',
+    hitLimit: false,
   });
   return ref.id;
 }
@@ -255,7 +261,80 @@ export async function getActiveSession(userId: string): Promise<ParkingSession |
     active: data.active,
     timerMinutes: data.timerMinutes ?? undefined,
     warnMinutes: data.warnMinutes ?? 10,
+    spotType: data.spotType ?? 'street',
+    spotCity: data.spotCity ?? 'Unknown',
   };
+}
+
+export async function getSessionHistory(userId: string): Promise<ParkingSession[]> {
+  const q = query(
+    collection(db, 'sessions'),
+    where('userId', '==', userId),
+    where('active', '==', false),
+    orderBy('startTime', 'desc'),
+    limit(50),
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map(d => {
+    const data = d.data();
+    return {
+      id: d.id,
+      spotId: data.spotId,
+      userId: data.userId,
+      lat: data.lat,
+      lng: data.lng,
+      startTime: data.startTime instanceof Timestamp ? data.startTime.toDate() : new Date(),
+      endTime: data.endTime instanceof Timestamp ? data.endTime.toDate() : null,
+      active: false,
+      timerMinutes: data.timerMinutes ?? undefined,
+      warnMinutes: data.warnMinutes ?? 10,
+      spotType: data.spotType ?? 'street',
+      spotCity: data.spotCity ?? 'Unknown',
+      hitLimit: data.hitLimit ?? false,
+    };
+  });
+}
+
+// ─── Occupancy reports ────────────────────────────────────────────────────────
+
+/**
+ * Submit a crowd-sourced "this spot is taken" report.
+ * Deduplicates by userId + spotId + hour (overwrites the existing doc for that hour).
+ */
+export async function submitOccupancyReport(
+  spotId: string,
+  userId: string,
+): Promise<void> {
+  const hourKey = new Date().toISOString().slice(0, 13); // e.g. "2025-06-01T14"
+  const docId = `${userId}_${spotId}_${hourKey}`;
+  await setDoc(doc(db, 'occupancyReports', docId), {
+    spotId,
+    userId,
+    reportedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Subscribe to occupancy reports from the last 2 hours.
+ * Returns reportCounts keyed by spotId.
+ */
+export function subscribeToRecentReports(
+  onUpdate: (counts: Record<string, number>) => void,
+): () => void {
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const q = query(
+    collection(db, 'occupancyReports'),
+    where('reportedAt', '>=', Timestamp.fromDate(twoHoursAgo)),
+  );
+
+  return onSnapshot(q, (snapshot: QuerySnapshot) => {
+    const counts: Record<string, number> = {};
+    snapshot.docs.forEach(d => {
+      const spotId = d.data().spotId as string;
+      counts[spotId] = (counts[spotId] ?? 0) + 1;
+    });
+    onUpdate(counts);
+  });
 }
 
 // ─── User-submitted spots ─────────────────────────────────────────────────────

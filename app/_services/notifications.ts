@@ -85,6 +85,32 @@ export async function cancelSessionNotifications(ids: string[]): Promise<void> {
 }
 
 /**
+ * Schedule a reminder when no timer is set ("still parked after 3 hours").
+ */
+export async function scheduleStillParkedReminder(
+  triggerDate: Date,
+  spotLabel: string,
+  locale: 'en' | 'fr',
+): Promise<string> {
+  const title = locale === 'fr' ? 'Toujours stationné ?' : 'Still parked?';
+  const body = locale === 'fr'
+    ? `Vous êtes stationné depuis 3 heures à ${spotLabel}.`
+    : `You've been parked at ${spotLabel} for 3 hours.`;
+
+  const id = await Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      data: { type: 'reminder', spot: spotLabel },
+      sound: true,
+    },
+    trigger: { type: SchedulableTriggerInputTypes.DATE, date: triggerDate },
+  });
+
+  return id;
+}
+
+/**
  * Cancel ALL scheduled notifications (call on "I'm Leaving").
  */
 export async function cancelAllNotifications(): Promise<void> {

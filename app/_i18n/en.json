@@ -2,7 +2,8 @@
   "appName": "ParkFree",
   "tabs": {
     "map": "Map",
-    "profile": "Profile"
+    "profile": "Profile",
+    "history": "History"
   },
   "map": {
     "title": "Free Parking",
@@ -13,7 +14,14 @@
     "loadingSpots": "Loading parking spots…",
     "noSpotsFound": "No free spots found nearby",
     "addSpot": "Add a spot",
-    "refreshing": "Refreshing spots…"
+    "refreshing": "Refreshing spots…",
+    "searchThisArea": "Search this area",
+    "legend": "Legend",
+    "legendFree": "No restrictions",
+    "legendTimeLimited": "Time limited",
+    "legendPermit": "Permit / fee",
+    "legendOther": "Other restriction",
+    "legendOccupied": "Occupied"
   },
   "spot": {
     "free": "Free Parking",
@@ -93,6 +101,22 @@
     "openSource": "Data from OpenStreetMap contributors",
     "spotsSubmitted": "Spots submitted",
     "sessionsParked": "Sessions parked"
+  },
+  "reports": {
+    "reportTaken": "This spot is full",
+    "thanks": "Thanks for reporting!",
+    "oneReported": "1 person reported this full recently",
+    "manyReported": "%{count} people reported this full recently"
+  },
+  "history": {
+    "title": "History",
+    "empty": "No parking sessions yet",
+    "limitHit": "Limit hit",
+    "durationHM": "%{hours}h %{minutes}m",
+    "durationM": "%{minutes}m",
+    "street": "Street parking",
+    "lot": "Parking lot",
+    "garage": "Garage"
   },
   "errors": {
     "fetchFailed": "Could not load parking spots",

@@ -31,6 +31,9 @@ export interface ParkingSession {
   active: boolean;
   timerMinutes?: number;
   warnMinutes?: number;
+  spotType?: string;
+  spotCity?: string;
+  hitLimit?: boolean;
 }
 
 export interface UserSpotSubmission {
@@ -64,4 +67,11 @@ export interface DirectionsTarget {
   lat: number;
   lng: number;
   label: string;
+}
+
+export interface OccupancyReport {
+  id: string;
+  spotId: string;
+  userId: string;
+  reportedAt: Date;
 }

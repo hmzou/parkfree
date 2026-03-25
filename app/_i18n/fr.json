@@ -2,7 +2,8 @@
   "appName": "ParkFree",
   "tabs": {
     "map": "Carte",
-    "profile": "Profil"
+    "profile": "Profil",
+    "history": "Historique"
   },
   "map": {
     "title": "Stationnement gratuit",
@@ -13,7 +14,14 @@
     "loadingSpots": "Chargement des places de stationnement…",
     "noSpotsFound": "Aucune place gratuite trouvée à proximité",
     "addSpot": "Ajouter une place",
-    "refreshing": "Mise à jour…"
+    "refreshing": "Mise à jour…",
+    "searchThisArea": "Rechercher ici",
+    "legend": "Légende",
+    "legendFree": "Sans restriction",
+    "legendTimeLimited": "Durée limitée",
+    "legendPermit": "Permis / payant",
+    "legendOther": "Autre restriction",
+    "legendOccupied": "Occupé"
   },
   "spot": {
     "free": "Stationnement gratuit",
@@ -93,6 +101,22 @@
     "openSource": "Données des contributeurs OpenStreetMap",
     "spotsSubmitted": "Places soumises",
     "sessionsParked": "Sessions de stationnement"
+  },
+  "reports": {
+    "reportTaken": "Cette place est occupée",
+    "thanks": "Merci pour votre signalement !",
+    "oneReported": "1 personne a signalé cette place occupée récemment",
+    "manyReported": "%{count} personnes ont signalé cette place occupée récemment"
+  },
+  "history": {
+    "title": "Historique",
+    "empty": "Aucune session de stationnement pour l'instant",
+    "limitHit": "Limite atteinte",
+    "durationHM": "%{hours}h %{minutes}m",
+    "durationM": "%{minutes}m",
+    "street": "Stationnement sur rue",
+    "lot": "Terrain de stationnement",
+    "garage": "Garage"
   },
   "errors": {
     "fetchFailed": "Impossible de charger les places",

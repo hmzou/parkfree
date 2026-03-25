@@ -28,31 +28,29 @@ import { t } from '../_i18n';
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { coordinate, permissionStatus, loading: locationLoading, requestPermission } = useLocation();
-  const { spots, loading: spotsLoading, error: spotsError, refresh } = useSpots();
+  const { spots, loading: spotsLoading, isCached, error: spotsError, reportCounts, refresh } = useSpots();
   const { userId, session, startParking, stopParking, loading: sessionLoading } = useSession();
   const { timer, startTimer, stopTimer } = useTimer();
 
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpot | null>(null);
-  // expandedSpotId tracks which spot has had its action buttons revealed (second tap / "See options").
   const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
   const [addSpotVisible, setAddSpotVisible] = useState(false);
   const [addSpotCoord, setAddSpotCoord] = useState<Coordinate | null>(null);
 
+  // "Search this area" pill state
+  const [searchCoord, setSearchCoord] = useState<Coordinate | null>(null);
+  const [showSearchBtn, setShowSearchBtn] = useState(false);
+
   // One-time initial Overpass search once the GPS location resolves.
-  // We do NOT re-run this on every GPS coord change — subsequent searches are only
-  // triggered by the user dragging the map (onMapIdle → handleMapMoved → refresh).
   const initialFetchRef = useRef(false);
   useEffect(() => {
     if (locationLoading || initialFetchRef.current) return;
     initialFetchRef.current = true;
     void refresh(coordinate);
-    // coordinate is the resolved GPS fix at this point (locationLoading just became false).
-    // We intentionally do NOT add coordinate to the dep array — GPS updates should not
-    // re-trigger Overpass searches; only map drags should.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationLoading, refresh]);
 
-  // Restore timer when session has a timerMinutes set (primitive deps avoid re-running on new object identity)
+  // Restore timer when session has a timerMinutes set
   useEffect(() => {
     if (!session?.timerMinutes || session.timerMinutes <= 0 || !session.startTime) return;
     startTimer(session.timerMinutes, session.warnMinutes ?? 10, session.startTime);
@@ -67,11 +65,9 @@ export default function MapScreen() {
   const handleSpotPress = useCallback((spot: ParkingSpot) => {
     setSelectedSpot(prev => {
       if (prev?.id === spot.id) {
-        // Second tap on the same pin → expand to show action buttons
         setExpandedSpotId(spot.id);
         return prev;
       }
-      // First tap on a new pin → show compact card, reset expansion
       setExpandedSpotId(null);
       return spot;
     });
@@ -96,6 +92,8 @@ export default function MapScreen() {
           selectedSpot.lng,
           timerMinutes,
           warnMinutes,
+          selectedSpot.type,
+          selectedSpot.city,
         );
         if (timerMinutes && timerMinutes > 0) {
           startTimer(timerMinutes, warnMinutes);
@@ -118,12 +116,20 @@ export default function MapScreen() {
     }
   }, [stopParking, stopTimer]);
 
+  // Map moved: store coord + show Search button. Do NOT auto-search.
   const handleMapMoved = useCallback(
     (coord: Coordinate) => {
-      refresh(coord);
+      setSearchCoord(coord);
+      setShowSearchBtn(true);
     },
-    [refresh],
+    [],
   );
+
+  const handleSearchThisArea = useCallback(async () => {
+    if (!searchCoord) return;
+    setShowSearchBtn(false);
+    await refresh(searchCoord);
+  }, [searchCoord, refresh]);
 
   const handleLongPress = useCallback((coord: Coordinate) => {
     setAddSpotCoord(coord);
@@ -149,9 +155,6 @@ export default function MapScreen() {
   }
 
   // ── Loading screen ──────────────────────────────────────────────────────────
-  // Keep showing until the first fix. Denied is handled above. When permission is already
-  // granted, status flips before getCurrentPosition finishes — we must not mount the map
-  // on the Ottawa fallback during that gap.
   if (locationLoading) {
     return (
       <View style={styles.centerScreen}>
@@ -169,6 +172,8 @@ export default function MapScreen() {
           userCoordinate={coordinate}
           spots={spots}
           selectedSpotId={selectedSpot?.id ?? null}
+          isCached={isCached}
+          reportCounts={reportCounts}
           onSpotPress={handleSpotPress}
           onMapMoved={handleMapMoved}
           onLongPress={handleLongPress}
@@ -192,6 +197,24 @@ export default function MapScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* "Search this area" pill */}
+        {showSearchBtn && !spotsLoading && (
+          <TouchableOpacity
+            style={[styles.searchPill, { top: insets.top + 60 }]}
+            onPress={handleSearchThisArea}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="search" size={15} color="#111" />
+            <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+          </TouchableOpacity>
+        )}
+        {showSearchBtn && spotsLoading && (
+          <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 60 }]}>
+            <ActivityIndicator size="small" color="#111" />
+            <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+          </View>
+        )}
 
         {/* FAB — Add Spot */}
         {!session && (
@@ -230,6 +253,7 @@ export default function MapScreen() {
           onParkHere={handleParkHere}
           onClose={handleSheetClose}
           sessionActive={!!session}
+          reportCounts={reportCounts}
         />
 
         {/* Add spot modal */}
@@ -326,6 +350,30 @@ const styles = StyleSheet.create({
     color: '#F44336',
     fontSize: 12,
     fontWeight: '600',
+  },
+  searchPill: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  searchPillLoading: {
+    opacity: 0.8,
+  },
+  searchPillText: {
+    color: '#111',
+    fontWeight: '700',
+    fontSize: 14,
   },
   fab: {
     position: 'absolute',

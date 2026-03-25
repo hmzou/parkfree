@@ -1,39 +1,87 @@
-import React, { useRef, useCallback, useEffect, useMemo, memo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useRef, useCallback, useEffect, useMemo, memo, useState } from 'react';
+import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
-import type { MapState } from '@rnmapbox/maps';
+import type { MapState, ShapeSource as ShapeSourceType } from '@rnmapbox/maps';
 import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
-import { SpotPin } from './SpotPin';
+import { t } from '../_i18n';
+import { Ionicons } from '@expo/vector-icons';
 
 MapboxGL.setAccessToken(
   (Constants.expoConfig?.extra?.mapboxAccessToken as string) ?? '',
 );
 
-// Stable constants — defined outside components to avoid new object refs on every render
-const ANCHOR = { x: 0.5, y: 1 };
 const ATTRIBUTION_POSITION = { bottom: 8, right: 8 };
 
-// ─── SpotMarker ───────────────────────────────────────────────────────────────
-// Memoized per-spot marker. Prevents all pins from re-rendering when only one
-// spot changes (e.g. a different pin is selected, or the parent re-renders for
-// an unrelated reason). Also stabilises the `coordinate` array and `onPress`
-// callback so Mapbox does not see spurious prop changes.
-const SpotMarker = memo<{
-  spot: ParkingSpot;
-  selected: boolean;
-  onPress: (spot: ParkingSpot) => void;
-}>(({ spot, selected, onPress }) => {
-  const coordinate = useMemo(
-    (): [number, number] => [spot.lng, spot.lat],
-    [spot.lng, spot.lat],
-  );
-  const handlePress = useCallback(() => onPress(spot), [onPress, spot]);
+// ─── Pin color helpers ─────────────────────────────────────────────────────────
 
+function getPinColor(spot: ParkingSpot, reportCount: number): string {
+  if (spot.occupied) return '#F44336';
+  if (reportCount >= 2) return '#FF5722';
+  if (reportCount === 1) return '#FFB300';
+  if (spot.feeRequired) return '#9E9E9E';
+  if (spot.seasonalBan) return '#FF5722';
+  if (spot.timeRestrictions) return '#FFB300';
+  return '#4CAF50';
+}
+
+// Convert spots array to a GeoJSON FeatureCollection for ShapeSource
+function buildGeoJSON(
+  spots: ParkingSpot[],
+  selectedId: string | null,
+  reportCounts: Record<string, number>,
+): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: spots.map(spot => ({
+      type: 'Feature' as const,
+      id: spot.id,
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [spot.lng, spot.lat],
+      },
+      properties: {
+        id: spot.id,
+        pinColor: getPinColor(spot, reportCounts[spot.id] ?? 0),
+        selected: spot.id === selectedId ? 1 : 0,
+      },
+    })),
+  };
+}
+
+// ─── Legend ────────────────────────────────────────────────────────────────────
+
+const LEGEND_ITEMS = [
+  { color: '#4CAF50', key: 'map.legendFree' },
+  { color: '#FFB300', key: 'map.legendTimeLimited' },
+  { color: '#9E9E9E', key: 'map.legendPermit' },
+  { color: '#FF5722', key: 'map.legendOther' },
+  { color: '#F44336', key: 'map.legendOccupied' },
+];
+
+const MapLegend = memo(() => {
+  const [open, setOpen] = useState(false);
   return (
-    <MapboxGL.MarkerView id={spot.id} coordinate={coordinate} anchor={ANCHOR}>
-      <SpotPin spot={spot} selected={selected} onPress={handlePress} />
-    </MapboxGL.MarkerView>
+    <View style={styles.legendContainer}>
+      <TouchableOpacity
+        style={styles.legendToggle}
+        onPress={() => setOpen(v => !v)}
+        activeOpacity={0.85}
+      >
+        <Ionicons name={open ? 'close' : 'information-circle-outline'} size={18} color="#fff" />
+        {!open && <Text style={styles.legendToggleText}>{t('map.legend')}</Text>}
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.legendPanel}>
+          {LEGEND_ITEMS.map(item => (
+            <View key={item.color} style={styles.legendRow}>
+              <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+              <Text style={styles.legendLabel}>{t(item.key)}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
   );
 });
 
@@ -43,6 +91,8 @@ interface Props {
   userCoordinate: Coordinate;
   spots: ParkingSpot[];
   selectedSpotId: string | null;
+  isCached: boolean;
+  reportCounts: Record<string, number>;
   onSpotPress: (spot: ParkingSpot) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
@@ -52,33 +102,36 @@ export const ParkFreeMapView: React.FC<Props> = ({
   userCoordinate,
   spots,
   selectedSpotId,
+  isCached,
+  reportCounts,
   onSpotPress,
   onMapMoved,
   onLongPress,
 }) => {
   const cameraRef = useRef<MapboxGL.Camera>(null);
+  const sourceRef = useRef<ShapeSourceType>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // `defaultSettings` is read once when Camera mounts — no setCamera timing issues.
-  // The parent (MapScreen) keeps showing a loading screen until locationLoading=false,
-  // so by the time this component mounts, userCoordinate is already the real GPS fix
-  // (or the Ottawa fallback if GPS timed out). Either way, we center on the right place
-  // at zoom 14 (neighbourhood level) and let the user pan/zoom freely after that.
   const cameraDefaultSettings = useMemo(
     () => ({
       centerCoordinate: [userCoordinate.longitude, userCoordinate.latitude] as [number, number],
       zoomLevel: 14,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [], // Only evaluated once at mount — intentional
+    [],
   );
 
-  // `onMapIdle` fires after the map settles (no intermediate events during pan/zoom)
-  // and provides a `MapState` with the camera center in `properties.center`.
+  const geoJSON = useMemo(
+    () => buildGeoJSON(spots, selectedSpotId, reportCounts),
+    [spots, selectedSpotId, reportCounts],
+  );
+
+  // Point opacity: 0.5 for cached, 1.0 for fresh
+  const pointOpacity = isCached ? 0.5 : 1.0;
+
   const handleMapIdle = useCallback(
     (state: MapState) => {
       const center = state?.properties?.center;
-      // GeoJSON.Position is typically [lng, lat]
       if (!Array.isArray(center) || center.length < 2) return;
       const lng = center[0];
       const lat = center[1];
@@ -108,6 +161,41 @@ export const ParkFreeMapView: React.FC<Props> = ({
     [onLongPress],
   );
 
+  // Handle taps on clusters or individual points
+  const handleSourcePress = useCallback(
+    async (event: { features: GeoJSON.Feature[] }) => {
+      const feature = event.features?.[0];
+      if (!feature?.properties) return;
+
+      // Cluster tap → zoom in
+      if (feature.properties.cluster) {
+        const geometry = feature.geometry as GeoJSON.Point;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const zoom = await (sourceRef.current as any)?.getClusterExpansionZoom(feature);
+          cameraRef.current?.setCamera({
+            centerCoordinate: geometry.coordinates as [number, number],
+            zoomLevel: (zoom ?? 16) + 1,
+            animationDuration: 400,
+          });
+        } catch {
+          cameraRef.current?.setCamera({
+            centerCoordinate: geometry.coordinates as [number, number],
+            zoomLevel: 16,
+            animationDuration: 400,
+          });
+        }
+        return;
+      }
+
+      // Individual point tap
+      const spotId = feature.properties.id as string;
+      const spot = spots.find(s => s.id === spotId);
+      if (spot) onSpotPress(spot);
+    },
+    [spots, onSpotPress],
+  );
+
   return (
     <View style={styles.container}>
       <MapboxGL.MapView
@@ -125,16 +213,81 @@ export const ParkFreeMapView: React.FC<Props> = ({
         {/* User location dot */}
         <MapboxGL.UserLocation visible />
 
-        {/* Parking spot pins — each wrapped in its own memo component */}
-        {spots.map(spot => (
-          <SpotMarker
-            key={spot.id}
-            spot={spot}
-            selected={spot.id === selectedSpotId}
-            onPress={onSpotPress}
+        {/* Clustered parking spot pins */}
+        <MapboxGL.ShapeSource
+          ref={sourceRef}
+          id="spots-source"
+          shape={geoJSON}
+          cluster
+          clusterMaxZoomLevel={15}
+          clusterRadius={40}
+          onPress={handleSourcePress}
+        >
+          {/* Cluster background circles */}
+          <MapboxGL.CircleLayer
+            id="cluster-circle"
+            filter={['has', 'point_count']}
+            style={{
+              circleColor: [
+                'interpolate', ['linear'], ['get', 'point_count'],
+                1, '#4CAF50',
+                6, '#FFB300',
+                16, '#FF5722',
+              ],
+              circleRadius: [
+                'interpolate', ['linear'], ['get', 'point_count'],
+                1, 18,
+                20, 28,
+              ],
+              circleStrokeColor: '#fff',
+              circleStrokeWidth: 2,
+              circleOpacity: pointOpacity,
+              circleStrokeOpacity: pointOpacity,
+            }}
           />
-        ))}
+          {/* Cluster count label */}
+          <MapboxGL.SymbolLayer
+            id="cluster-count"
+            filter={['has', 'point_count']}
+            style={{
+              textField: '{point_count_abbreviated}',
+              textSize: 13,
+              textColor: '#fff',
+              textFont: ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+              textAllowOverlap: true,
+            }}
+          />
+          {/* Selected unclustered point (larger) */}
+          <MapboxGL.CircleLayer
+            id="unclustered-selected"
+            filter={['all', ['!', ['has', 'point_count']], ['==', ['get', 'selected'], 1]]}
+            style={{
+              circleColor: ['get', 'pinColor'],
+              circleRadius: 14,
+              circleStrokeColor: '#fff',
+              circleStrokeWidth: 3,
+              circleOpacity: pointOpacity,
+              circleStrokeOpacity: pointOpacity,
+            }}
+          />
+          {/* Regular unclustered points */}
+          <MapboxGL.CircleLayer
+            id="unclustered-point"
+            filter={['all', ['!', ['has', 'point_count']], ['!=', ['get', 'selected'], 1]]}
+            style={{
+              circleColor: ['get', 'pinColor'],
+              circleRadius: 9,
+              circleStrokeColor: '#fff',
+              circleStrokeWidth: 2,
+              circleOpacity: pointOpacity,
+              circleStrokeOpacity: pointOpacity,
+            }}
+          />
+        </MapboxGL.ShapeSource>
       </MapboxGL.MapView>
+
+      {/* Pin color legend */}
+      <MapLegend />
     </View>
   );
 };
@@ -145,5 +298,56 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
+  },
+  legendContainer: {
+    position: 'absolute',
+    bottom: 80,
+    left: 12,
+  },
+  legendToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(26,26,26,0.92)',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  legendToggleText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  legendPanel: {
+    marginTop: 6,
+    backgroundColor: 'rgba(26,26,26,0.95)',
+    borderRadius: 12,
+    padding: 10,
+    gap: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 6,
+    minWidth: 160,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendLabel: {
+    color: '#CCC',
+    fontSize: 12,
   },
 });
