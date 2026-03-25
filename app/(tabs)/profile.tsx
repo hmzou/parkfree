@@ -1,16 +1,15 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getLocale, setLocale, t } from '../i18n';
-import { useSession } from '../hooks/useSession';
+import { getLocale, setLocale, t } from '../_i18n';
+import { useSession } from '../_hooks/useSession';
 
 const APP_VERSION = '1.0.0';
 
@@ -18,12 +17,6 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { userId, session } = useSession();
   const [locale, setLocaleState] = useState<'en' | 'fr'>(getLocale());
-
-  const toggleLocale = useCallback(() => {
-    const next = locale === 'en' ? 'fr' : 'en';
-    setLocale(next);
-    setLocaleState(next);
-  }, [locale]);
 
   const shortId = userId ? userId.slice(0, 12) + '…' : '—';
 

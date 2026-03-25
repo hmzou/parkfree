@@ -7,11 +7,10 @@ import {
   TouchableOpacity,
   Linking,
   Platform,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { DirectionsTarget } from '../types';
-import { t } from '../i18n';
+import { DirectionsTarget } from '../_types';
+import { t } from '../_i18n';
 
 interface NavApp {
   id: string;

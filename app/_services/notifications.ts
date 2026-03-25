@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { SchedulableTriggerInputTypes } from 'expo-notifications';
 import { Platform } from 'react-native';
 
 // Configure notification handler once at module load
@@ -44,7 +45,7 @@ export async function scheduleWarningNotification(
       data: { type: 'warning', spot: spotLabel },
       sound: true,
     },
-    trigger: { date: triggerDate },
+    trigger: { type: SchedulableTriggerInputTypes.DATE, date: triggerDate },
   });
 
   return id;
@@ -70,7 +71,7 @@ export async function scheduleExpiryNotification(
       data: { type: 'expiry', spot: spotLabel },
       sound: true,
     },
-    trigger: { date: triggerDate },
+    trigger: { type: SchedulableTriggerInputTypes.DATE, date: triggerDate },
   });
 
   return id;

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Animated, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ParkingSpot, PinStatus } from '../types';
+import { ParkingSpot, PinStatus } from '../_types';
 
 interface Props {
   spot: ParkingSpot;

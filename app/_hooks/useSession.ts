@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ParkingSession } from '../types';
+import { ParkingSession } from '../_types';
 import {
   ensureAnonymousAuth,
   startSession,
@@ -8,14 +8,14 @@ import {
   markSpotOccupied,
   markSpotFree,
   subscribeToAuthState,
-} from '../services/firebase';
+} from '../_services/firebase';
 import {
   requestNotificationPermissions,
   scheduleWarningNotification,
   scheduleExpiryNotification,
   cancelAllNotifications,
-} from '../services/notifications';
-import { getLocale } from '../i18n';
+} from '../_services/notifications';
+import { getLocale } from '../_i18n';
 
 interface UseSessionResult {
   userId: string | null;

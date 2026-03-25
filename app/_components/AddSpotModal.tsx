@@ -13,10 +13,9 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SpotType, Coordinate } from '../types';
-import { t } from '../i18n';
-import { submitUserSpot } from '../services/firebase';
-import { ensureAnonymousAuth } from '../services/firebase';
+import { SpotType, Coordinate } from '../_types';
+import { t } from '../_i18n';
+import { submitUserSpot, ensureAnonymousAuth } from '../_services/firebase';
 
 interface Props {
   visible: boolean;

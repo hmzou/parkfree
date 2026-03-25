@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { TimerState } from '../types';
+import { TimerState } from '../_types';
 
 const EMPTY_TIMER: TimerState = {
   active: false,

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { TimerState } from '../types';
-import { t } from '../i18n';
+import { TimerState } from '../_types';
+import { t } from '../_i18n';
 
 interface Props {
   timer: TimerState;

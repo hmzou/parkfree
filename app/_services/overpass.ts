@@ -1,4 +1,4 @@
-import { ParkingSpot, SpotType, City } from '../types';
+import { ParkingSpot, SpotType, City } from '../_types';
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 

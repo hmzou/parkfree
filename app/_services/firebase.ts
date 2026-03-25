@@ -1,11 +1,14 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import {
+  initializeAuth,
   getAuth,
   signInAnonymously,
   Auth,
   User,
   onAuthStateChanged,
+  type Persistence,
 } from 'firebase/auth';
+import { Platform } from 'react-native';
 import {
   getFirestore,
   Firestore,
@@ -25,7 +28,30 @@ import {
   QuerySnapshot,
 } from 'firebase/firestore';
 import Constants from 'expo-constants';
-import { ParkingSpot, ParkingSession, UserSpotSubmission, SpotType } from '../types';
+import { ParkingSpot, ParkingSession, UserSpotSubmission, SpotType } from '../_types';
+
+/**
+ * Use AsyncStorage-backed auth when the native module exists (current dev/release build).
+ * If the binary predates the dependency (Expo Go, old dev client, broken link), require() throws
+ * — fall back to getAuth (in-memory) so the app still loads. Rebuild the app to get persistence.
+ */
+function createAuth(firebaseApp: FirebaseApp): Auth {
+  if (Platform.OS === 'web') {
+    return getAuth(firebaseApp);
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    const { getReactNativePersistence } = require('@firebase/auth/dist/rn/index.js') as {
+      getReactNativePersistence: (storage: typeof AsyncStorage) => Persistence;
+    };
+    return initializeAuth(firebaseApp, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    return getAuth(firebaseApp);
+  }
+}
 
 // ─── Firebase init ────────────────────────────────────────────────────────────
 
@@ -48,13 +74,17 @@ const firebaseConfig = {
 };
 
 let app: FirebaseApp;
+let auth: Auth;
+
 if (getApps().length === 0) {
   app = initializeApp(firebaseConfig);
+  auth = createAuth(app);
 } else {
   app = getApps()[0];
+  auth = getAuth(app);
 }
 
-export const auth: Auth = getAuth(app);
+export { auth };
 export const db: Firestore = getFirestore(app);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -243,12 +273,29 @@ export async function submitUserSpot(
 
 // ─── OSM spot upsert (called from overpass service) ───────────────────────────
 
-export async function upsertOsmSpot(spot: Omit<ParkingSpot, 'id'>): Promise<void> {
+/**
+ * Write or merge an OSM spot into Firestore using the spot's own OSM ID as the
+ * document key (e.g. "osm_node_123456").  This keeps the Firestore document ID
+ * in sync with the in-memory ParkingSpot.id so that occupancy lookups and
+ * markSpotOccupied() can find the correct document.
+ */
+export async function upsertOsmSpot(spot: ParkingSpot): Promise<void> {
   await setDoc(
-    doc(db, 'spots', `osm_${spot.lat}_${spot.lng}`),
+    doc(db, 'spots', spot.id),
     {
-      ...spot,
+      source: spot.source,
+      lat: spot.lat,
+      lng: spot.lng,
+      type: spot.type,
+      feeRequired: spot.feeRequired,
+      timeRestrictions: spot.timeRestrictions,
+      seasonalBan: spot.seasonalBan,
+      occupied: spot.occupied,
       occupiedSince: spot.occupiedSince ? Timestamp.fromDate(spot.occupiedSince) : null,
+      occupiedBy: spot.occupiedBy,
+      city: spot.city,
+      verified: spot.verified ?? true,
+      notes: spot.notes ?? '',
     },
     { merge: true },
   );

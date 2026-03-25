@@ -5,32 +5,30 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
   Alert,
-  Platform,
   Linking,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ParkFreeMapView } from '../components/ParkFreeMapView';
-import { SpotBottomSheet } from '../components/BottomSheet';
-import { TimerBar } from '../components/TimerBar';
-import { AddSpotModal } from '../components/AddSpotModal';
+import { ParkFreeMapView } from '../_components/ParkFreeMapView';
+import { SpotBottomSheet } from '../_components/BottomSheet';
+import { TimerBar } from '../_components/TimerBar';
+import { AddSpotModal } from '../_components/AddSpotModal';
 
-import { useLocation } from '../hooks/useLocation';
-import { useSpots } from '../hooks/useSpots';
-import { useSession } from '../hooks/useSession';
-import { useTimer } from '../hooks/useTimer';
+import { useLocation } from '../_hooks/useLocation';
+import { useSpots } from '../_hooks/useSpots';
+import { useSession } from '../_hooks/useSession';
+import { useTimer } from '../_hooks/useTimer';
 
-import { ParkingSpot, Coordinate } from '../types';
-import { t } from '../i18n';
+import { ParkingSpot, Coordinate } from '../_types';
+import { t } from '../_i18n';
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { coordinate, permissionStatus, loading: locationLoading, requestPermission } = useLocation();
-  const { spots, loading: spotsLoading, error: spotsError, refresh } = useSpots(coordinate);
+  const { spots, loading: spotsLoading, error: spotsError, refresh } = useSpots();
   const { userId, session, startParking, stopParking, loading: sessionLoading } = useSession();
   const { timer, startTimer, stopTimer } = useTimer();
 
@@ -38,12 +36,31 @@ export default function MapScreen() {
   const [addSpotVisible, setAddSpotVisible] = useState(false);
   const [addSpotCoord, setAddSpotCoord] = useState<Coordinate | null>(null);
 
-  // Restore timer when session has a timerMinutes set
+  // One-time initial Overpass search once the GPS location resolves.
+  // We do NOT re-run this on every GPS coord change — subsequent searches are only
+  // triggered by the user dragging the map (onMapIdle → handleMapMoved → refresh).
+  const initialFetchRef = useRef(false);
   useEffect(() => {
-    if (session?.timerMinutes && session.timerMinutes > 0 && session.startTime) {
-      startTimer(session.timerMinutes, session.warnMinutes ?? 10, session.startTime);
-    }
-  }, [session, startTimer]);
+    if (locationLoading || initialFetchRef.current) return;
+    initialFetchRef.current = true;
+    void refresh(coordinate);
+    // coordinate is the resolved GPS fix at this point (locationLoading just became false).
+    // We intentionally do NOT add coordinate to the dep array — GPS updates should not
+    // re-trigger Overpass searches; only map drags should.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationLoading, refresh]);
+
+  // Restore timer when session has a timerMinutes set (primitive deps avoid re-running on new object identity)
+  useEffect(() => {
+    if (!session?.timerMinutes || session.timerMinutes <= 0 || !session.startTime) return;
+    startTimer(session.timerMinutes, session.warnMinutes ?? 10, session.startTime);
+  }, [
+    session?.id,
+    session?.timerMinutes,
+    session?.warnMinutes,
+    session?.startTime?.getTime(),
+    startTimer,
+  ]);
 
   const handleSpotPress = useCallback((spot: ParkingSpot) => {
     setSelectedSpot(spot);
@@ -115,7 +132,10 @@ export default function MapScreen() {
   }
 
   // ── Loading screen ──────────────────────────────────────────────────────────
-  if (locationLoading && permissionStatus === 'undetermined') {
+  // Keep showing until the first fix. Denied is handled above. When permission is already
+  // granted, status flips before getCurrentPosition finishes — we must not mount the map
+  // on the Ottawa fallback during that gap.
+  if (locationLoading) {
     return (
       <View style={styles.centerScreen}>
         <ActivityIndicator size="large" color="#00C853" />

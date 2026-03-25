@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ParkingSpot, Coordinate } from '../types';
-import { fetchFreeParkingSpots, haversineMeters } from '../services/overpass';
-import { subscribeToSpots, subscribeToUserSpots, upsertOsmSpot } from '../services/firebase';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ParkingSpot, Coordinate } from '../_types';
+import { fetchFreeParkingSpots, haversineMeters } from '../_services/overpass';
+import { subscribeToSpots, subscribeToUserSpots, upsertOsmSpot } from '../_services/firebase';
 
 const REFRESH_THRESHOLD_METERS = 500;
 
@@ -12,7 +12,7 @@ interface UseSpotsResult {
   refresh: (coord: Coordinate) => Promise<void>;
 }
 
-export function useSpots(initialCoord: Coordinate): UseSpotsResult {
+export function useSpots(): UseSpotsResult {
   const [osmSpots, setOsmSpots] = useState<ParkingSpot[]>([]);
   const [firestoreSpots, setFirestoreSpots] = useState<ParkingSpot[]>([]);
   const [userSpots, setUserSpots] = useState<ParkingSpot[]>([]);
@@ -20,13 +20,13 @@ export function useSpots(initialCoord: Coordinate): UseSpotsResult {
   const [error, setError] = useState<string | null>(null);
 
   const lastFetchCoord = useRef<Coordinate | null>(null);
+  const isFetchingRef = useRef(false);
+  const pendingCoordRef = useRef<Coordinate | null>(null);
 
-  // Merge all spot sources: Firestore overrides OSM (for occupancy), user spots appended
-  const mergeSpots = useCallback((): ParkingSpot[] => {
+  const spots = useMemo((): ParkingSpot[] => {
     const firestoreMap = new Map(firestoreSpots.map(s => [s.id, s]));
     const merged = osmSpots.map(s => firestoreMap.get(s.id) ?? s);
 
-    // Add user spots that don't duplicate existing
     const existingIds = new Set(merged.map(s => s.id));
     for (const us of userSpots) {
       if (!existingIds.has(us.id)) merged.push(us);
@@ -34,12 +34,6 @@ export function useSpots(initialCoord: Coordinate): UseSpotsResult {
 
     return merged;
   }, [osmSpots, firestoreSpots, userSpots]);
-
-  const [spots, setSpots] = useState<ParkingSpot[]>([]);
-
-  useEffect(() => {
-    setSpots(mergeSpots());
-  }, [mergeSpots]);
 
   // Subscribe to Firestore occupancy updates in real time
   useEffect(() => {
@@ -56,6 +50,12 @@ export function useSpots(initialCoord: Coordinate): UseSpotsResult {
   }, []);
 
   const refresh = useCallback(async (coord: Coordinate) => {
+    // Avoid overlapping Overpass requests (can look like “endless searching”).
+    if (isFetchingRef.current) {
+      pendingCoordRef.current = coord;
+      return;
+    }
+
     if (lastFetchCoord.current) {
       const dist = haversineMeters(
         lastFetchCoord.current.latitude,
@@ -66,6 +66,9 @@ export function useSpots(initialCoord: Coordinate): UseSpotsResult {
       if (dist < REFRESH_THRESHOLD_METERS) return; // not far enough to re-fetch
     }
 
+    isFetchingRef.current = true;
+    pendingCoordRef.current = null;
+
     setLoading(true);
     setError(null);
     try {
@@ -73,36 +76,23 @@ export function useSpots(initialCoord: Coordinate): UseSpotsResult {
       lastFetchCoord.current = coord;
       setOsmSpots(fetched);
 
-      // Sync to Firestore (best-effort, don't block UI)
+      // Sync to Firestore (best-effort, don't block UI).
+      // Pass the full spot so upsertOsmSpot uses spot.id as the document key,
+      // keeping Firestore IDs in sync with in-memory IDs for correct occupancy merging.
       Promise.all(
-        fetched.map(spot =>
-          upsertOsmSpot({
-            source: spot.source,
-            lat: spot.lat,
-            lng: spot.lng,
-            type: spot.type,
-            feeRequired: spot.feeRequired,
-            timeRestrictions: spot.timeRestrictions,
-            seasonalBan: spot.seasonalBan,
-            occupied: spot.occupied,
-            occupiedSince: spot.occupiedSince,
-            occupiedBy: spot.occupiedBy,
-            city: spot.city,
-            verified: true,
-          }).catch(() => null),
-        ),
+        fetched.map(spot => upsertOsmSpot(spot).catch(() => null)),
       ).catch(() => null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
-    }
-  }, []);
+      isFetchingRef.current = false;
 
-  // Initial fetch
-  useEffect(() => {
-    refresh(initialCoord);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      // If something else requested a refresh while we were fetching, do one more round.
+      const next = pendingCoordRef.current;
+      pendingCoordRef.current = null;
+      if (next) void refresh(next);
+    }
   }, []);
 
   return { spots, loading, error, refresh };

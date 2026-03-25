@@ -4,7 +4,6 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { View, Text, StyleSheet } from 'react-native';
 
 SplashScreen.preventAutoHideAsync();
 

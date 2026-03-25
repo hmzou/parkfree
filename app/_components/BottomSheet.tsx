@@ -9,11 +9,11 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import RNBottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import RNBottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
-import { ParkingSpot } from '../types';
-import { t } from '../i18n';
-import { nearestFreeSpots, haversineMeters } from '../services/overpass';
+import { ParkingSpot } from '../_types';
+import { t } from '../_i18n';
+import { nearestFreeSpots, haversineMeters } from '../_services/overpass';
 import { DirectionsModal } from './DirectionsModal';
 
 interface Props {
@@ -56,7 +56,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
     } else {
       sheetRef.current?.close();
     }
-  }, [spot]);
+  }, [spot?.id]);
 
   const handleParkHere = useCallback(async () => {
     setParking(true);
