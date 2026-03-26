@@ -30,7 +30,7 @@ interface UseSessionResult {
     spotType?: string,
     spotCity?: string,
   ) => Promise<void>;
-  stopParking: () => Promise<void>;
+  stopParking: (hitLimit?: boolean) => Promise<void>;
   loading: boolean;
 }
 
@@ -47,7 +47,6 @@ export function useSession(): UseSessionResult {
         const active = await getActiveSession(user.uid);
         setSession(active);
       } else {
-        // Sign in anonymously
         const authed = await ensureAnonymousAuth();
         setUserId(authed.uid);
         const active = await getActiveSession(authed.uid);
@@ -105,10 +104,9 @@ export function useSession(): UseSessionResult {
         const hasPerms = await requestNotificationPermissions();
         if (hasPerms) {
           const locale = getLocale();
-          const spotLabel = `${spotType ?? 'Street parking'} — ${spotCity ?? 'Ottawa'}`;
+          const spotLabel = `${spotType ?? 'Parking'} — ${spotCity ?? 'Ottawa'}`;
 
           if (timerMinutes && timerMinutes > 0) {
-            // Timer-based notifications: warning + expiry
             const expiryDate = new Date(now.getTime() + timerMinutes * 60 * 1000);
             const warnDate = new Date(expiryDate.getTime() - warnMinutes * 60 * 1000);
 
@@ -132,12 +130,12 @@ export function useSession(): UseSessionResult {
     [],
   );
 
-  const stopParking = useCallback(async () => {
+  const stopParking = useCallback(async (hitLimit = false) => {
     if (!session) return;
     setLoading(true);
     try {
       await markSpotFree(session.spotId);
-      await endSession(session.id);
+      await endSession(session.id, hitLimit);
       await cancelAllNotifications();
       setSession(null);
     } catch (err) {

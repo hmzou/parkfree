@@ -3,10 +3,13 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { TimerState } from '../_types';
 import { t } from '../_i18n';
+import { useLocale } from '../_contexts/LocaleContext';
 
 interface Props {
   timer: TimerState;
   sessionStartTime: Date | null;
+  /** Human-readable spot description, e.g. "Street parking · Ottawa" */
+  spotLabel?: string;
   onLeave: () => void;
   loading?: boolean;
 }
@@ -32,7 +35,10 @@ function formatElapsed(startTime: Date): string {
   return formatDuration(secs);
 }
 
-export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, onLeave, loading }) => {
+export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, spotLabel, onLeave, loading }) => {
+  // Subscribe to locale so t() calls update when language changes
+  useLocale();
+
   const barAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -78,7 +84,9 @@ export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, onLeave, lo
         <View style={styles.info}>
           <View style={styles.dotRow}>
             <View style={[styles.dot, { backgroundColor: barColor }]} />
-            <Text style={styles.label}>{t('actions.parkHere')}</Text>
+            <Text style={styles.label} numberOfLines={1}>
+              {spotLabel ?? t('session.parkedAt')}
+            </Text>
           </View>
           <Text style={[styles.time, { color: barColor }]}>{timeDisplay}</Text>
         </View>
@@ -124,6 +132,7 @@ const styles = StyleSheet.create({
   info: {
     flex: 1,
     gap: 4,
+    marginRight: 12,
   },
   dotRow: {
     flexDirection: 'row',
@@ -134,11 +143,13 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+    flexShrink: 0,
   },
   label: {
     fontSize: 12,
     color: '#AAA',
     fontWeight: '500',
+    flexShrink: 1,
   },
   time: {
     fontSize: 18,
@@ -152,6 +163,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     gap: 6,
+    flexShrink: 0,
   },
   leaveBtnDisabled: {
     opacity: 0.6,

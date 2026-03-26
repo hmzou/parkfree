@@ -11,12 +11,16 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { DirectionsTarget } from '../_types';
 import { t } from '../_i18n';
+import { useLocale } from '../_contexts/LocaleContext';
 
 interface NavApp {
   id: string;
   label: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
+  /** Native deep-link URL (tried first) */
   url: (lat: number, lng: number, label: string) => string;
+  /** Web browser fallback when native app is not installed */
+  webUrl: (lat: number, lng: number, label: string) => string;
   iosOnly?: boolean;
 }
 
@@ -27,6 +31,8 @@ const NAV_APPS: NavApp[] = [
     icon: 'navigate-circle-outline',
     url: (lat, lng) =>
       `comgooglemaps://?daddr=${lat},${lng}&directionsmode=driving`,
+    webUrl: (lat, lng) =>
+      `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
   },
   {
     id: 'waze',
@@ -34,6 +40,8 @@ const NAV_APPS: NavApp[] = [
     icon: 'car-outline',
     url: (lat, lng) =>
       `waze://?ll=${lat},${lng}&navigate=yes`,
+    webUrl: (lat, lng) =>
+      `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,
   },
   {
     id: 'apple',
@@ -41,6 +49,8 @@ const NAV_APPS: NavApp[] = [
     icon: 'map-outline',
     url: (lat, lng, label) =>
       `maps://?daddr=${lat},${lng}&q=${encodeURIComponent(label)}`,
+    webUrl: (lat, lng) =>
+      `https://maps.apple.com/?daddr=${lat},${lng}`,
     iosOnly: true,
   },
 ];
@@ -52,21 +62,24 @@ interface Props {
 }
 
 export const DirectionsModal: React.FC<Props> = ({ visible, target, onClose }) => {
+  // Subscribe to locale changes so labels update when language is switched
+  useLocale();
+
   const openApp = useCallback(
     async (app: NavApp) => {
       if (!target) return;
-      const url = app.url(target.lat, target.lng, target.label);
-      const canOpen = await Linking.canOpenURL(url);
+      const deepLink = app.url(target.lat, target.lng, target.label);
+      const canOpen = await Linking.canOpenURL(deepLink);
 
       if (!canOpen) {
-        // Fallback to browser-based Google Maps
-        const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}&travelmode=driving`;
-        await Linking.openURL(webUrl);
+        // Use each app's own web fallback (not always Google Maps)
+        const fallback = app.webUrl(target.lat, target.lng, target.label);
+        await Linking.openURL(fallback);
         onClose();
         return;
       }
 
-      await Linking.openURL(url);
+      await Linking.openURL(deepLink);
       onClose();
     },
     [target, onClose],

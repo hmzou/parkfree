@@ -8,7 +8,6 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,7 +18,8 @@ import { AddSpotModal } from '../_components/AddSpotModal';
 
 import { useLocation } from '../_hooks/useLocation';
 import { useSpots } from '../_hooks/useSpots';
-import { useSession } from '../_hooks/useSession';
+import { useSessionContext } from '../_contexts/SessionContext';
+import { useLocale } from '../_contexts/LocaleContext';
 import { useTimer } from '../_hooks/useTimer';
 
 import { ParkingSpot, Coordinate } from '../_types';
@@ -27,9 +27,12 @@ import { t } from '../_i18n';
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  // Subscribe to locale so all t() calls re-evaluate on language switch
+  useLocale();
+
   const { coordinate, permissionStatus, loading: locationLoading, requestPermission } = useLocation();
   const { spots, loading: spotsLoading, isCached, error: spotsError, reportCounts, refresh } = useSpots();
-  const { userId, session, startParking, stopParking, loading: sessionLoading } = useSession();
+  const { session, startParking, stopParking, loading: sessionLoading } = useSessionContext();
   const { timer, startTimer, stopTimer } = useTimer();
 
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpot | null>(null);
@@ -37,11 +40,11 @@ export default function MapScreen() {
   const [addSpotVisible, setAddSpotVisible] = useState(false);
   const [addSpotCoord, setAddSpotCoord] = useState<Coordinate | null>(null);
 
-  // "Search this area" pill state
+  // "Search this area" pill
   const [searchCoord, setSearchCoord] = useState<Coordinate | null>(null);
   const [showSearchBtn, setShowSearchBtn] = useState(false);
 
-  // One-time initial Overpass search once the GPS location resolves.
+  // One-time initial fetch when GPS resolves
   const initialFetchRef = useRef(false);
   useEffect(() => {
     if (locationLoading || initialFetchRef.current) return;
@@ -109,21 +112,20 @@ export default function MapScreen() {
 
   const handleLeave = useCallback(async () => {
     try {
-      await stopParking();
+      // hitLimit = true if the countdown reached zero before the user tapped "Leave"
+      const timerExpired = timer.active && timer.remainingSeconds === 0;
+      await stopParking(timerExpired);
       stopTimer();
     } catch {
       Alert.alert(t('errors.sessionFailed'), t('errors.retry'));
     }
-  }, [stopParking, stopTimer]);
+  }, [stopParking, stopTimer, timer]);
 
-  // Map moved: store coord + show Search button. Do NOT auto-search.
-  const handleMapMoved = useCallback(
-    (coord: Coordinate) => {
-      setSearchCoord(coord);
-      setShowSearchBtn(true);
-    },
-    [],
-  );
+  // Map moved: store coord + show "Search" pill. Do NOT auto-search.
+  const handleMapMoved = useCallback((coord: Coordinate) => {
+    setSearchCoord(coord);
+    setShowSearchBtn(true);
+  }, []);
 
   const handleSearchThisArea = useCallback(async () => {
     if (!searchCoord) return;
@@ -139,6 +141,17 @@ export default function MapScreen() {
   const handleOpenSettings = useCallback(() => {
     Linking.openSettings();
   }, []);
+
+  // Build a human-readable spot label for the session bar
+  const sessionSpotLabel = session
+    ? `${
+        session.spotType === 'garage'
+          ? t('spot.garage')
+          : session.spotType === 'lot'
+          ? t('spot.lot')
+          : t('spot.street')
+      } · ${session.spotCity ?? 'Ottawa'}`
+    : undefined;
 
   // ── Location denied screen ──────────────────────────────────────────────────
   if (permissionStatus === 'denied') {
@@ -165,106 +178,121 @@ export default function MapScreen() {
   }
 
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <View style={styles.root}>
-        {/* Map */}
-        <ParkFreeMapView
-          userCoordinate={coordinate}
-          spots={spots}
-          selectedSpotId={selectedSpot?.id ?? null}
-          isCached={isCached}
-          reportCounts={reportCounts}
-          onSpotPress={handleSpotPress}
-          onMapMoved={handleMapMoved}
-          onLongPress={handleLongPress}
-        />
+    <View style={styles.root}>
+      {/* Map */}
+      <ParkFreeMapView
+        userCoordinate={coordinate}
+        spots={spots}
+        selectedSpotId={selectedSpot?.id ?? null}
+        isCached={isCached}
+        reportCounts={reportCounts}
+        onSpotPress={handleSpotPress}
+        onMapMoved={handleMapMoved}
+        onLongPress={handleLongPress}
+      />
 
-        {/* Top status bar */}
-        <View style={[styles.topBar, { top: insets.top + 12 }]}>
-          <View style={styles.topBarLeft}>
-            <Text style={styles.appName}>{t('appName')}</Text>
-            {spotsLoading && (
-              <ActivityIndicator size="small" color="#00C853" style={{ marginLeft: 8 }} />
-            )}
-          </View>
-          {spotsError && (
-            <TouchableOpacity
-              style={styles.errorChip}
-              onPress={() => refresh(coordinate)}
-            >
-              <Ionicons name="refresh" size={14} color="#F44336" />
-              <Text style={styles.errorChipText}>{t('errors.retry')}</Text>
-            </TouchableOpacity>
+      {/* Top status bar */}
+      <View style={[styles.topBar, { top: insets.top + 12 }]}>
+        <View style={styles.topBarLeft}>
+          <Text style={styles.appName}>{t('appName')}</Text>
+          {spotsLoading && (
+            <ActivityIndicator size="small" color="#00C853" style={{ marginLeft: 8 }} />
           )}
         </View>
-
-        {/* "Search this area" pill */}
-        {showSearchBtn && !spotsLoading && (
+        {spotsError && (
           <TouchableOpacity
-            style={[styles.searchPill, { top: insets.top + 60 }]}
-            onPress={handleSearchThisArea}
-            activeOpacity={0.88}
+            style={styles.errorChip}
+            onPress={() => refresh(coordinate)}
           >
-            <Ionicons name="search" size={15} color="#111" />
-            <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+            <Ionicons name="refresh" size={14} color="#F44336" />
+            <Text style={styles.errorChipText}>{t('errors.retry')}</Text>
           </TouchableOpacity>
         )}
-        {showSearchBtn && spotsLoading && (
-          <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 60 }]}>
-            <ActivityIndicator size="small" color="#111" />
-            <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
-          </View>
-        )}
-
-        {/* FAB — Add Spot */}
-        {!session && (
-          <TouchableOpacity
-            style={[styles.fab, { bottom: insets.bottom + 20 }]}
-            onPress={() => {
-              setAddSpotCoord(coordinate);
-              setAddSpotVisible(true);
-            }}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="add" size={28} color="#fff" />
-          </TouchableOpacity>
-        )}
-
-        {/* Active session timer bar */}
-        {session && (
-          <View style={{ paddingBottom: insets.bottom }}>
-            <TimerBar
-              timer={timer}
-              sessionStartTime={session.startTime}
-              onLeave={handleLeave}
-              loading={sessionLoading}
-            />
-          </View>
-        )}
-
-        {/* Spot detail bottom sheet */}
-        <SpotBottomSheet
-          spot={selectedSpot}
-          allSpots={spots}
-          userLat={coordinate.latitude}
-          userLng={coordinate.longitude}
-          expanded={expandedSpotId === selectedSpot?.id}
-          onExpand={handleExpand}
-          onParkHere={handleParkHere}
-          onClose={handleSheetClose}
-          sessionActive={!!session}
-          reportCounts={reportCounts}
-        />
-
-        {/* Add spot modal */}
-        <AddSpotModal
-          visible={addSpotVisible}
-          coordinate={addSpotCoord}
-          onClose={() => setAddSpotVisible(false)}
-          onSubmitted={() => setAddSpotVisible(false)}
-        />
       </View>
-    </GestureHandlerRootView>
+
+      {/* Offline / cached banner — shown when Overpass failed and stale cache is displayed */}
+      {isCached && !spotsLoading && (
+        <View style={[styles.offlineBanner, { top: insets.top + 56 }]}>
+          <Ionicons name="cloud-offline-outline" size={14} color="#FFB300" />
+          <Text style={styles.offlineBannerText}>
+            {t('errors.fetchFailed')} — showing cached spots
+          </Text>
+        </View>
+      )}
+
+      {/* Empty state — shown after loading when Overpass returned nothing */}
+      {!spotsLoading && !spotsError && spots.length === 0 && !isCached && (
+        <View style={[styles.emptyBanner, { top: insets.top + 56 }]}>
+          <Ionicons name="search-outline" size={14} color="#AAA" />
+          <Text style={styles.emptyBannerText}>{t('map.noSpotsFound')}</Text>
+        </View>
+      )}
+
+      {/* "Search this area" pill */}
+      {showSearchBtn && !spotsLoading && (
+        <TouchableOpacity
+          style={[styles.searchPill, { top: insets.top + 60 }]}
+          onPress={handleSearchThisArea}
+          activeOpacity={0.88}
+        >
+          <Ionicons name="search" size={15} color="#111" />
+          <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+        </TouchableOpacity>
+      )}
+      {showSearchBtn && spotsLoading && (
+        <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 60 }]}>
+          <ActivityIndicator size="small" color="#111" />
+          <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+        </View>
+      )}
+
+      {/* FAB — Add Spot (hidden during active session) */}
+      {!session && (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: insets.bottom + 20 }]}
+          onPress={() => {
+            setAddSpotCoord(coordinate);
+            setAddSpotVisible(true);
+          }}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
+      )}
+
+      {/* Active session timer bar */}
+      {session && (
+        <TimerBar
+          timer={timer}
+          sessionStartTime={session.startTime}
+          spotLabel={sessionSpotLabel}
+          onLeave={handleLeave}
+          loading={sessionLoading}
+        />
+      )}
+
+      {/* Spot detail bottom sheet */}
+      <SpotBottomSheet
+        spot={selectedSpot}
+        allSpots={spots}
+        userLat={coordinate.latitude}
+        userLng={coordinate.longitude}
+        expanded={expandedSpotId === selectedSpot?.id}
+        onExpand={handleExpand}
+        onParkHere={handleParkHere}
+        onClose={handleSheetClose}
+        sessionActive={!!session}
+        reportCounts={reportCounts}
+      />
+
+      {/* Add spot modal */}
+      <AddSpotModal
+        visible={addSpotVisible}
+        coordinate={addSpotCoord}
+        onClose={() => setAddSpotVisible(false)}
+        onSubmitted={() => setAddSpotVisible(false)}
+      />
+    </View>
   );
 }
 
@@ -350,6 +378,39 @@ const styles = StyleSheet.create({
     color: '#F44336',
     fontSize: 12,
     fontWeight: '600',
+  },
+  offlineBanner: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,179,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,179,0,0.3)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+  offlineBannerText: {
+    color: '#FFB300',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  emptyBanner: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(26,26,26,0.9)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+  emptyBannerText: {
+    color: '#AAA',
+    fontSize: 12,
   },
   searchPill: {
     position: 'absolute',

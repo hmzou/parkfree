@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useMemo, memo, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import type { MapState, ShapeSource as ShapeSourceType } from '@rnmapbox/maps';
@@ -59,7 +59,8 @@ const LEGEND_ITEMS = [
   { color: '#F44336', key: 'map.legendOccupied' },
 ];
 
-const MapLegend = memo(() => {
+// Not memoized — needs to re-render when locale changes so t() calls update
+const MapLegend: React.FC = () => {
   const [open, setOpen] = useState(false);
   return (
     <View style={styles.legendContainer}>
@@ -83,7 +84,7 @@ const MapLegend = memo(() => {
       )}
     </View>
   );
-});
+};
 
 // ─── ParkFreeMapView ──────────────────────────────────────────────────────────
 

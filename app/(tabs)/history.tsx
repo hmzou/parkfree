@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSession } from '../_hooks/useSession';
+import { useSessionContext } from '../_contexts/SessionContext';
+import { useLocale } from '../_contexts/LocaleContext';
 import { getSessionHistory } from '../_services/firebase';
 import { ParkingSession } from '../_types';
 import { t } from '../_i18n';
@@ -45,7 +46,8 @@ function spotTypeLabel(spotType?: string): string {
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
-  const { userId } = useSession();
+  useLocale(); // subscribe to locale changes so t() calls update
+  const { userId } = useSessionContext();
   const [sessions, setSessions] = useState<ParkingSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);

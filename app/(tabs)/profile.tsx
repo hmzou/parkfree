@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -8,15 +8,17 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getLocale, setLocale, t } from '../_i18n';
-import { useSession } from '../_hooks/useSession';
+import { t } from '../_i18n';
+import { useSessionContext } from '../_contexts/SessionContext';
+import { useLocale } from '../_contexts/LocaleContext';
 
 const APP_VERSION = '1.0.0';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { userId, session } = useSession();
-  const [locale, setLocaleState] = useState<'en' | 'fr'>(getLocale());
+  const { userId, session } = useSessionContext();
+  // locale + setLocale drives the language toggle AND subscribes this screen to locale changes
+  const { locale, setLocale } = useLocale();
 
   const shortId = userId ? userId.slice(0, 12) + '…' : '—';
 
@@ -59,47 +61,21 @@ export default function ProfileScreen() {
 
         <View style={styles.langRow}>
           <TouchableOpacity
-            style={[
-              styles.langChip,
-              locale === 'en' && styles.langChipActive,
-            ]}
-            onPress={() => {
-              if (locale !== 'en') {
-                setLocale('en');
-                setLocaleState('en');
-              }
-            }}
+            style={[styles.langChip, locale === 'en' && styles.langChipActive]}
+            onPress={() => { if (locale !== 'en') setLocale('en'); }}
             activeOpacity={0.8}
           >
-            <Text
-              style={[
-                styles.langChipText,
-                locale === 'en' && styles.langChipTextActive,
-              ]}
-            >
+            <Text style={[styles.langChipText, locale === 'en' && styles.langChipTextActive]}>
               {t('profile.english')}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              styles.langChip,
-              locale === 'fr' && styles.langChipActive,
-            ]}
-            onPress={() => {
-              if (locale !== 'fr') {
-                setLocale('fr');
-                setLocaleState('fr');
-              }
-            }}
+            style={[styles.langChip, locale === 'fr' && styles.langChipActive]}
+            onPress={() => { if (locale !== 'fr') setLocale('fr'); }}
             activeOpacity={0.8}
           >
-            <Text
-              style={[
-                styles.langChipText,
-                locale === 'fr' && styles.langChipTextActive,
-              ]}
-            >
+            <Text style={[styles.langChipText, locale === 'fr' && styles.langChipTextActive]}>
               {t('profile.french')}
             </Text>
           </TouchableOpacity>
@@ -110,14 +86,15 @@ export default function ProfileScreen() {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Ionicons name="map-outline" size={22} color="#00C853" />
-          <Text style={styles.cardTitle}>Pin Legend</Text>
+          <Text style={styles.cardTitle}>{t('map.legend')}</Text>
         </View>
 
         {[
-          { color: '#00C853', label: t('spot.available') },
-          { color: '#F44336', label: t('spot.occupied') },
-          { color: '#FFC107', label: t('spot.timeLimited') },
-          { color: '#FF6D00', label: `${t('spot.seasonalBan')} (flashing)` },
+          { color: '#4CAF50', label: t('map.legendFree') },
+          { color: '#FFB300', label: t('map.legendTimeLimited') },
+          { color: '#9E9E9E', label: t('map.legendPermit') },
+          { color: '#FF5722', label: t('map.legendOther') },
+          { color: '#F44336', label: t('map.legendOccupied') },
         ].map(item => (
           <View key={item.color} style={styles.legendRow}>
             <View style={[styles.legendDot, { backgroundColor: item.color }]} />

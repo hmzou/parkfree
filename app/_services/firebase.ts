@@ -233,10 +233,11 @@ export async function startSession(
   return ref.id;
 }
 
-export async function endSession(sessionId: string): Promise<void> {
+export async function endSession(sessionId: string, hitLimit = false): Promise<void> {
   await updateDoc(doc(db, 'sessions', sessionId), {
     endTime: serverTimestamp(),
     active: false,
+    hitLimit,
   });
 }
 

@@ -17,8 +17,8 @@ import { ParkingSpot } from '../_types';
 import { t } from '../_i18n';
 import { nearestFreeSpots, haversineMeters } from '../_services/overpass';
 import { DirectionsModal } from './DirectionsModal';
-import { submitOccupancyReport } from '../_services/firebase';
-import { ensureAnonymousAuth } from '../_services/firebase';
+import { submitOccupancyReport, ensureAnonymousAuth } from '../_services/firebase';
+import { useLocale } from '../_contexts/LocaleContext';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 // 3 snap points: PEEK (spot name only), HALF (full details), FULL
@@ -72,6 +72,9 @@ export const SpotBottomSheet: React.FC<Props> = ({
   sessionActive,
   reportCounts,
 }) => {
+  // Subscribe to locale changes so all t() calls update on language switch
+  useLocale();
+
   const sheetRef = useRef<RNBottomSheet>(null);
   const snapPoints = [SNAP_PEEK, SNAP_HALF, SNAP_FULL];
 
