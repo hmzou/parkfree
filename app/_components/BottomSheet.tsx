@@ -17,6 +17,7 @@ import { ParkingSpot } from '../_types';
 import { t } from '../_i18n';
 import { nearestFreeSpots, haversineMeters } from '../_services/overpass';
 import { DirectionsModal } from './DirectionsModal';
+import { OccupancyMeter } from './OccupancyMeter';
 import { submitOccupancyReport, ensureAnonymousAuth } from '../_services/firebase';
 import { useLocale } from '../_contexts/LocaleContext';
 
@@ -58,6 +59,12 @@ interface Props {
   onClose: () => void;
   sessionActive: boolean;
   reportCounts: Record<string, number>;
+  /** Business lot occupancy data — supplied when a business search result has a linked lot */
+  businessOccupancy?: {
+    activeCount: number;
+    capacity: number;
+  } | null;
+  onSelectNearestSpot?: (spot: ParkingSpot) => void;
 }
 
 export const SpotBottomSheet: React.FC<Props> = ({
@@ -71,6 +78,8 @@ export const SpotBottomSheet: React.FC<Props> = ({
   onClose,
   sessionActive,
   reportCounts,
+  businessOccupancy,
+  onSelectNearestSpot,
 }) => {
   // Subscribe to locale changes so all t() calls update on language switch
   useLocale();
@@ -272,6 +281,18 @@ export const SpotBottomSheet: React.FC<Props> = ({
                 <Text style={styles.occupiedAgo}>
                   {t('spot.occupiedAgo', { minutes: occupiedMinsAgo })}
                 </Text>
+              )}
+
+              {/* Business occupancy meter */}
+              {businessOccupancy && (
+                <OccupancyMeter
+                  activeCount={businessOccupancy.activeCount}
+                  capacity={businessOccupancy.capacity}
+                  nearestFreeSpot={nearby[0] ?? null}
+                  nearestFreeSpotLat={spot.lat}
+                  nearestFreeSpotLng={spot.lng}
+                  onSelectNearestSpot={onSelectNearestSpot}
+                />
               )}
 
               {/* Nearby free spots when occupied */}

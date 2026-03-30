@@ -11,10 +11,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ParkFreeMapView } from '../_components/ParkFreeMapView';
+import { ParkFreeMapView, ParkFreeMapViewHandle } from '../_components/ParkFreeMapView';
 import { SpotBottomSheet } from '../_components/BottomSheet';
 import { TimerBar } from '../_components/TimerBar';
 import { AddSpotModal } from '../_components/AddSpotModal';
+import { LocationSearchBar } from '../_components/LocationSearchBar';
+import { SearchResultCard } from '../_components/SearchResultCard';
 
 import { useLocation } from '../_hooks/useLocation';
 import { useSpots } from '../_hooks/useSpots';
@@ -24,6 +26,26 @@ import { useTimer } from '../_hooks/useTimer';
 
 import { ParkingSpot, Coordinate } from '../_types';
 import { t } from '../_i18n';
+import { nearestFreeSpots } from '../_services/overpass';
+import { GeocodingResult, geocodeAddress } from '../_services/geocoding';
+import {
+  getBusinessParking,
+  subscribeToLotOccupancy,
+  BusinessParkingRecord,
+} from '../_services/businessParking';
+import { fetchFreeParkingSpots } from '../_services/overpass';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+interface SearchState {
+  result: GeocodingResult;
+  nearestSpot: ParkingSpot | null;
+}
+
+interface BusinessOccupancyState {
+  record: BusinessParkingRecord;
+  activeCount: number;
+}
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -35,6 +57,8 @@ export default function MapScreen() {
   const { session, startParking, stopParking, loading: sessionLoading } = useSessionContext();
   const { timer, startTimer, stopTimer } = useTimer();
 
+  const mapRef = useRef<ParkFreeMapViewHandle>(null);
+
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpot | null>(null);
   const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
   const [addSpotVisible, setAddSpotVisible] = useState(false);
@@ -43,6 +67,15 @@ export default function MapScreen() {
   // "Search this area" pill
   const [searchCoord, setSearchCoord] = useState<Coordinate | null>(null);
   const [showSearchBtn, setShowSearchBtn] = useState(false);
+
+  // ── Location search state ────────────────────────────────────────────────────
+  const [searchState, setSearchState] = useState<SearchState | null>(null);
+  const [searchMarker, setSearchMarker] = useState<Coordinate | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  // ── Business occupancy state ──────────────────────────────────────────────────
+  const [businessOccupancy, setBusinessOccupancy] = useState<BusinessOccupancyState | null>(null);
+  const lotUnsubRef = useRef<(() => void) | null>(null);
 
   // One-time initial fetch when GPS resolves
   const initialFetchRef = useRef(false);
@@ -65,6 +98,92 @@ export default function MapScreen() {
     startTimer,
   ]);
 
+  // Cleanup lot occupancy subscription on unmount
+  useEffect(() => {
+    return () => {
+      lotUnsubRef.current?.();
+    };
+  }, []);
+
+  // ── Search result handler ────────────────────────────────────────────────────
+
+  const handleSearchSelect = useCallback(
+    async (result: GeocodingResult) => {
+      setSearchLoading(true);
+      setSearchState(null);
+      setBusinessOccupancy(null);
+
+      // Unsubscribe previous lot watcher
+      lotUnsubRef.current?.();
+      lotUnsubRef.current = null;
+
+      try {
+        const searchCoordinate: Coordinate = {
+          latitude: result.latitude,
+          longitude: result.longitude,
+        };
+
+        // Fly map to the searched location
+        mapRef.current?.flyTo(result.latitude, result.longitude, 15);
+        setSearchMarker(searchCoordinate);
+
+        // Fetch fresh spots around the searched location (in parallel with business lookup)
+        const [freshSpots] = await Promise.all([
+          fetchFreeParkingSpots(result.latitude, result.longitude, 1500).catch(() => spots),
+        ]);
+
+        const spotsToSearch = freshSpots.length > 0 ? freshSpots : spots;
+
+        // Find the nearest free spot to the searched location
+        const nearest = nearestFreeSpots(spotsToSearch, result.latitude, result.longitude, 1);
+        const nearestSpot = nearest[0] ?? null;
+
+        setSearchState({ result, nearestSpot });
+
+        // If the result is a business POI, look up associated parking
+        if (result.isBusiness) {
+          try {
+            const businessRecord = await getBusinessParking(result.shortName);
+
+            if (businessRecord) {
+              // Subscribe to live occupancy for this lot
+              const unsub = subscribeToLotOccupancy(businessRecord.spotId, (activeCount) => {
+                setBusinessOccupancy({ record: businessRecord, activeCount });
+              });
+              lotUnsubRef.current = unsub;
+
+              // Also select the linked spot on the map if present
+              const linkedSpot = spotsToSearch.find(s => s.id === businessRecord.spotId);
+              if (linkedSpot) {
+                setSelectedSpot(linkedSpot);
+                setExpandedSpotId(null);
+              }
+            }
+          } catch {
+            // Business parking lookup is non-fatal
+          }
+        }
+      } catch {
+        // Geocoding or spot fetch failed — show whatever spots we have locally
+        const nearest = nearestFreeSpots(spots, result.latitude, result.longitude, 1);
+        setSearchState({ result, nearestSpot: nearest[0] ?? null });
+      } finally {
+        setSearchLoading(false);
+      }
+    },
+    [spots],
+  );
+
+  const handleDismissSearchResult = useCallback(() => {
+    setSearchState(null);
+    setSearchMarker(null);
+    setBusinessOccupancy(null);
+    lotUnsubRef.current?.();
+    lotUnsubRef.current = null;
+  }, []);
+
+  // ── Spot interactions ────────────────────────────────────────────────────────
+
   const handleSpotPress = useCallback((spot: ParkingSpot) => {
     setSelectedSpot(prev => {
       if (prev?.id === spot.id) {
@@ -74,6 +193,12 @@ export default function MapScreen() {
       setExpandedSpotId(null);
       return spot;
     });
+  }, []);
+
+  const handleSelectNearestSpot = useCallback((spot: ParkingSpot) => {
+    setSelectedSpot(spot);
+    setExpandedSpotId(null);
+    mapRef.current?.flyTo(spot.lat, spot.lng, 16);
   }, []);
 
   const handleSheetClose = useCallback(() => {
@@ -153,6 +278,12 @@ export default function MapScreen() {
       } · ${session.spotCity ?? 'Ottawa'}`
     : undefined;
 
+  // Business occupancy for the selected spot's bottom sheet
+  const spotBusinessOccupancy =
+    businessOccupancy && selectedSpot?.id === businessOccupancy.record.spotId
+      ? { activeCount: businessOccupancy.activeCount, capacity: businessOccupancy.record.capacity }
+      : null;
+
   // ── Location denied screen ──────────────────────────────────────────────────
   if (permissionStatus === 'denied') {
     return (
@@ -181,38 +312,47 @@ export default function MapScreen() {
     <View style={styles.root}>
       {/* Map */}
       <ParkFreeMapView
+        ref={mapRef}
         userCoordinate={coordinate}
         spots={spots}
         selectedSpotId={selectedSpot?.id ?? null}
         isCached={isCached}
         reportCounts={reportCounts}
+        searchMarker={searchMarker}
         onSpotPress={handleSpotPress}
         onMapMoved={handleMapMoved}
         onLongPress={handleLongPress}
       />
 
-      {/* Top status bar */}
-      <View style={[styles.topBar, { top: insets.top + 12 }]}>
-        <View style={styles.topBarLeft}>
+      {/* ── Top overlay: app name + search bar ─────────────────────────────── */}
+      <View style={[styles.topOverlay, { top: insets.top + 8 }]}>
+        {/* App name row */}
+        <View style={styles.appNameRow}>
           <Text style={styles.appName}>{t('appName')}</Text>
           {spotsLoading && (
             <ActivityIndicator size="small" color="#00C853" style={{ marginLeft: 8 }} />
           )}
+          {searchLoading && (
+            <ActivityIndicator size="small" color="#2196F3" style={{ marginLeft: 8 }} />
+          )}
+          {spotsError && (
+            <TouchableOpacity
+              style={styles.errorChip}
+              onPress={() => refresh(coordinate)}
+            >
+              <Ionicons name="refresh" size={14} color="#F44336" />
+              <Text style={styles.errorChipText}>{t('errors.retry')}</Text>
+            </TouchableOpacity>
+          )}
         </View>
-        {spotsError && (
-          <TouchableOpacity
-            style={styles.errorChip}
-            onPress={() => refresh(coordinate)}
-          >
-            <Ionicons name="refresh" size={14} color="#F44336" />
-            <Text style={styles.errorChipText}>{t('errors.retry')}</Text>
-          </TouchableOpacity>
-        )}
+
+        {/* Search bar */}
+        <LocationSearchBar onSelectResult={handleSearchSelect} />
       </View>
 
-      {/* Offline / cached banner — shown when Overpass failed and stale cache is displayed */}
+      {/* Offline / cached banner */}
       {isCached && !spotsLoading && (
-        <View style={[styles.offlineBanner, { top: insets.top + 56 }]}>
+        <View style={[styles.offlineBanner, { top: insets.top + 106 }]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#FFB300" />
           <Text style={styles.offlineBannerText}>
             {t('errors.fetchFailed')} — showing cached spots
@@ -220,9 +360,9 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* Empty state — shown after loading when Overpass returned nothing */}
-      {!spotsLoading && !spotsError && spots.length === 0 && !isCached && (
-        <View style={[styles.emptyBanner, { top: insets.top + 56 }]}>
+      {/* Empty state */}
+      {!spotsLoading && !spotsError && spots.length === 0 && !isCached && !searchState && (
+        <View style={[styles.emptyBanner, { top: insets.top + 106 }]}>
           <Ionicons name="search-outline" size={14} color="#AAA" />
           <Text style={styles.emptyBannerText}>{t('map.noSpotsFound')}</Text>
         </View>
@@ -231,7 +371,7 @@ export default function MapScreen() {
       {/* "Search this area" pill */}
       {showSearchBtn && !spotsLoading && (
         <TouchableOpacity
-          style={[styles.searchPill, { top: insets.top + 60 }]}
+          style={[styles.searchPill, { top: insets.top + 112 }]}
           onPress={handleSearchThisArea}
           activeOpacity={0.88}
         >
@@ -240,9 +380,23 @@ export default function MapScreen() {
         </TouchableOpacity>
       )}
       {showSearchBtn && spotsLoading && (
-        <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 60 }]}>
+        <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 112 }]}>
           <ActivityIndicator size="small" color="#111" />
           <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+        </View>
+      )}
+
+      {/* Search result card */}
+      {searchState && !searchLoading && (
+        <View style={[styles.searchResultContainer, { top: insets.top + 114 }]}>
+          <SearchResultCard
+            searchedLat={searchState.result.latitude}
+            searchedLng={searchState.result.longitude}
+            searchedName={searchState.result.shortName}
+            nearestSpot={searchState.nearestSpot}
+            onDismiss={handleDismissSearchResult}
+            onSelectSpot={handleSelectNearestSpot}
+          />
         </View>
       )}
 
@@ -283,6 +437,8 @@ export default function MapScreen() {
         onClose={handleSheetClose}
         sessionActive={!!session}
         reportCounts={reportCounts}
+        businessOccupancy={spotBusinessOccupancy}
+        onSelectNearestSpot={handleSelectNearestSpot}
       />
 
       {/* Add spot modal */}
@@ -338,15 +494,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: 12,
   },
-  topBar: {
+  // ── Top overlay (app name + search bar) ────────────────────────────────────
+  topOverlay: {
     position: 'absolute',
     left: 16,
     right: 16,
+    gap: 8,
+  },
+  appNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: 'rgba(26,26,26,0.92)',
-    borderRadius: 16,
+    borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 10,
     shadowColor: '#000',
@@ -355,15 +514,12 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  topBarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   appName: {
     color: '#00C853',
     fontWeight: '800',
     fontSize: 18,
     letterSpacing: 0.5,
+    flex: 1,
   },
   errorChip: {
     flexDirection: 'row',
@@ -379,6 +535,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  // ── Banners ─────────────────────────────────────────────────────────────────
   offlineBanner: {
     position: 'absolute',
     alignSelf: 'center',
@@ -412,6 +569,7 @@ const styles = StyleSheet.create({
     color: '#AAA',
     fontSize: 12,
   },
+  // ── Search this area pill ───────────────────────────────────────────────────
   searchPill: {
     position: 'absolute',
     alignSelf: 'center',
@@ -436,6 +594,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
+  // ── Search result card ──────────────────────────────────────────────────────
+  searchResultContainer: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+  },
+  // ── FAB ─────────────────────────────────────────────────────────────────────
   fab: {
     position: 'absolute',
     right: 20,

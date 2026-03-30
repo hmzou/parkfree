@@ -123,5 +123,18 @@
     "sessionFailed": "Impossible de démarrer la session",
     "submitFailed": "Impossible de soumettre la place",
     "retry": "Réessayer"
+  },
+  "search": {
+    "placeholder": "Rechercher une adresse ou un lieu…",
+    "closestFreeParking": "Stationnement gratuit le plus proche",
+    "away": "de distance",
+    "viewSpot": "Voir la place",
+    "noNearbySpots": "Aucune place gratuite trouvée à proximité"
+  },
+  "occupancy": {
+    "lotOccupancy": "Occupation du stationnement",
+    "spotsUsed": "%{used} / %{total} places utilisées",
+    "lotFull": "Ce stationnement est plein",
+    "nearestFreeIs": "Le stationnement gratuit le plus proche est à %{distance}"
   }
 }

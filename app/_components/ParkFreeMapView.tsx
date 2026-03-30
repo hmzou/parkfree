@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
 import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import type { MapState, ShapeSource as ShapeSourceType } from '@rnmapbox/maps';
@@ -88,28 +88,45 @@ const MapLegend: React.FC = () => {
 
 // ─── ParkFreeMapView ──────────────────────────────────────────────────────────
 
+export interface ParkFreeMapViewHandle {
+  flyTo: (latitude: number, longitude: number, zoomLevel?: number) => void;
+}
+
 interface Props {
   userCoordinate: Coordinate;
   spots: ParkingSpot[];
   selectedSpotId: string | null;
   isCached: boolean;
   reportCounts: Record<string, number>;
+  /** Optional marker coordinate for a searched location */
+  searchMarker?: Coordinate | null;
   onSpotPress: (spot: ParkingSpot) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
 }
 
-export const ParkFreeMapView: React.FC<Props> = ({
+export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   userCoordinate,
   spots,
   selectedSpotId,
   isCached,
   reportCounts,
+  searchMarker,
   onSpotPress,
   onMapMoved,
   onLongPress,
-}) => {
+}, ref) => {
   const cameraRef = useRef<MapboxGL.Camera>(null);
+
+  useImperativeHandle(ref, () => ({
+    flyTo: (latitude: number, longitude: number, zoomLevel = 15) => {
+      cameraRef.current?.setCamera({
+        centerCoordinate: [longitude, latitude],
+        zoomLevel,
+        animationDuration: 800,
+      });
+    },
+  }));
   const sourceRef = useRef<ShapeSourceType>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -285,13 +302,53 @@ export const ParkFreeMapView: React.FC<Props> = ({
             }}
           />
         </MapboxGL.ShapeSource>
+
+        {/* Search location marker */}
+        {searchMarker && (
+          <MapboxGL.ShapeSource
+            id="search-marker-source"
+            shape={{
+              type: 'FeatureCollection',
+              features: [
+                {
+                  type: 'Feature',
+                  id: 'search-marker',
+                  geometry: {
+                    type: 'Point',
+                    coordinates: [searchMarker.longitude, searchMarker.latitude],
+                  },
+                  properties: {},
+                },
+              ],
+            }}
+          >
+            <MapboxGL.CircleLayer
+              id="search-marker-halo"
+              style={{
+                circleColor: 'rgba(33,150,243,0.2)',
+                circleRadius: 22,
+                circleStrokeColor: 'rgba(33,150,243,0.6)',
+                circleStrokeWidth: 2,
+              }}
+            />
+            <MapboxGL.CircleLayer
+              id="search-marker-dot"
+              style={{
+                circleColor: '#2196F3',
+                circleRadius: 8,
+                circleStrokeColor: '#fff',
+                circleStrokeWidth: 2,
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        )}
       </MapboxGL.MapView>
 
       {/* Pin color legend */}
       <MapLegend />
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

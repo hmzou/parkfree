@@ -25,5 +25,11 @@ service cloud.firestore {
         && request.resource.data.verified == false;
       allow update: if false; // admin only via Firebase console
     }
+
+    // Business parking records — public read, admin write only
+    match /businessParking/{id} {
+      allow read: if true;
+      allow write: if false; // admin only via Firebase console
+    }
   }
 }

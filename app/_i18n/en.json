@@ -123,5 +123,18 @@
     "sessionFailed": "Could not start session",
     "submitFailed": "Could not submit spot",
     "retry": "Retry"
+  },
+  "search": {
+    "placeholder": "Search an address or place…",
+    "closestFreeParking": "Closest free parking",
+    "away": "away",
+    "viewSpot": "View Spot",
+    "noNearbySpots": "No free spots found near this location"
+  },
+  "occupancy": {
+    "lotOccupancy": "Lot occupancy",
+    "spotsUsed": "%{used} / %{total} spaces used",
+    "lotFull": "This lot is full",
+    "nearestFreeIs": "Nearest free parking is %{distance} away"
   }
 }
