@@ -189,7 +189,12 @@ export async function runOverpassQuery(
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        // Overpass rejects requests without a descriptive User-Agent (HTTP 406);
+        // browsers ignore this header and send their own, which is accepted.
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'ParkFree/1.0 (https://github.com/hmzou/parkfree)',
+        },
         body,
         signal: controller.signal,
       });

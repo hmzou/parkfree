@@ -130,7 +130,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
   const [warnMins, setWarnMins] = useState('10');
   const [parking, setParking] = useState(false);
   const [reportedThisSession, setReportedThisSession] = useState(false);
-  const [snapIndex, setSnapIndex] = useState(-1);
+  const [snapIndex, setSnapIndex] = useState(0);
 
   // Open/close sheet and reset local state whenever the selected spot changes.
   useEffect(() => {
@@ -238,7 +238,9 @@ export const SpotBottomSheet: React.FC<Props> = ({
     <>
       <RNBottomSheet
         ref={sheetRef}
-        index={-1}
+        // Only mounted while a spot is selected, so mount open: snapping a sheet
+        // that has not measured itself yet is silently ignored.
+        index={0}
         snapPoints={snapPoints}
         enablePanDownToClose
         onClose={onClose}
