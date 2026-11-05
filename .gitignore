@@ -12,3 +12,4 @@ dist/
 *.orig.*
 web-build/
 .env
+assets/data/osm-tiles/

@@ -1,44 +1,81 @@
 import { ParkingSpot, SpotType, City } from '../_types';
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_ENDPOINTS = [
+  // mail.ru has been the mirror that actually answers from this network
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+];
+// Slightly above the [timeout:25] in the query, so a busy server can still answer
+const ENDPOINT_TIMEOUT_MS = 30_000;
 
-// Ottawa + Gatineau bounding boxes
-const OTTAWA_BBOX = '45.2520,-76.3548,45.5376,-75.2467';
-const GATINEAU_BBOX = '45.3876,-76.0356,45.5505,-75.5835';
+// Combined Ottawa + Gatineau service area
+export const REGION_LAT_MIN = 45.2520;
+export const REGION_LAT_MAX = 45.5505;
+export const REGION_LNG_MIN = -76.3548;
+export const REGION_LNG_MAX = -75.2467;
 
-// Ottawa rough bounds for city labeling
-const OTTAWA_LAT_MIN = 45.2520;
-const OTTAWA_LAT_MAX = 45.5376;
-const OTTAWA_LNG_MIN = -76.3548;
-const OTTAWA_LNG_MAX = -75.2467;
-
-// Gatineau rough bounds
-const GATINEAU_LAT_MIN = 45.3876;
-const GATINEAU_LAT_MAX = 45.5505;
+// Gatineau's west (Aylmer) and east (Masson-Angers) limits along the river
 const GATINEAU_LNG_MIN = -76.0356;
-const GATINEAU_LNG_MAX = -75.5835;
+const GATINEAU_LNG_MAX = -75.40;
 
-function detectCity(lat: number, lng: number): City {
-  if (
-    lat >= GATINEAU_LAT_MIN && lat <= GATINEAU_LAT_MAX &&
-    lng >= GATINEAU_LNG_MIN && lng <= GATINEAU_LNG_MAX
-  ) {
-    return 'Gatineau';
+/**
+ * Approximate Ottawa River centreline as [lng, lat], west to east. The river is
+ * the Ontario/Quebec border, so it separates Ottawa (south) from Gatineau
+ * (north). Accurate to a few hundred metres, which is enough for a label.
+ */
+const OTTAWA_RIVER: [number, number][] = [
+  [-76.36, 45.44],
+  [-76.24, 45.48],
+  [-76.10, 45.51],
+  [-76.03, 45.475],
+  [-75.95, 45.42],
+  [-75.85, 45.375],
+  [-75.80, 45.37],
+  [-75.755, 45.395],
+  [-75.72, 45.418],
+  [-75.705, 45.43],
+  [-75.69, 45.442],
+  [-75.67, 45.462],
+  [-75.65, 45.468],
+  [-75.61, 45.478],
+  [-75.50, 45.51],
+  [-75.40, 45.53],
+  [-75.24, 45.56],
+];
+
+function riverLatAt(lng: number): number {
+  if (lng <= OTTAWA_RIVER[0][0]) return OTTAWA_RIVER[0][1];
+  for (let i = 1; i < OTTAWA_RIVER.length; i++) {
+    const [lng1, lat1] = OTTAWA_RIVER[i];
+    if (lng <= lng1) {
+      const [lng0, lat0] = OTTAWA_RIVER[i - 1];
+      return lat0 + ((lng - lng0) / (lng1 - lng0)) * (lat1 - lat0);
+    }
   }
-  if (
-    lat >= OTTAWA_LAT_MIN && lat <= OTTAWA_LAT_MAX &&
-    lng >= OTTAWA_LNG_MIN && lng <= OTTAWA_LNG_MAX
-  ) {
-    return 'Ottawa';
-  }
-  return 'Unknown';
+  return OTTAWA_RIVER[OTTAWA_RIVER.length - 1][1];
 }
 
+export function detectCity(lat: number, lng: number): City {
+  if (
+    lat < REGION_LAT_MIN || lat > REGION_LAT_MAX ||
+    lng < REGION_LNG_MIN || lng > REGION_LNG_MAX
+  ) {
+    return 'Unknown';
+  }
+  if (lat <= riverLatAt(lng)) return 'Ottawa';
+  // North shore outside Gatineau is other Quebec municipalities
+  return lng >= GATINEAU_LNG_MIN && lng <= GATINEAU_LNG_MAX ? 'Gatineau' : 'Unknown';
+}
+
+const STREET_PARKING = new Set(['street_side', 'lane', 'on_street', 'layby']);
+
 function parseSpotType(tags: Record<string, string>): SpotType {
-  const parking = tags['parking'] ?? tags['amenity'] ?? '';
-  if (parking === 'multi-storey' || parking === 'underground') return 'garage';
-  if (parking === 'surface' || parking === 'parking_lot') return 'lot';
-  return 'street';
+  const parking = tags['parking'] ?? '';
+  if (parking === 'multi-storey' || parking === 'underground' || parking === 'rooftop') return 'garage';
+  if (STREET_PARKING.has(parking)) return 'street';
+  // amenity=parking without a parking=* tag is almost always a surface lot
+  return 'lot';
 }
 
 function hasSeasonalBan(tags: Record<string, string>): boolean {
@@ -66,7 +103,7 @@ function extractTimeRestrictions(tags: Record<string, string>): string | null {
   return null;
 }
 
-interface OverpassElement {
+export interface OverpassElement {
   type: 'node' | 'way' | 'relation';
   id: number;
   lat?: number;
@@ -94,26 +131,97 @@ out center tags;
 `.trim();
 }
 
+export interface BBox {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
+export const REGION_BBOX: BBox = {
+  south: REGION_LAT_MIN,
+  west: REGION_LNG_MIN,
+  north: REGION_LAT_MAX,
+  east: REGION_LNG_MAX,
+};
+
+/** Same filters as buildQuery, over a bounding box (default: the whole region). */
+export function buildRegionQuery(bbox: BBox = REGION_BBOX): string {
+  const box = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
+  return `
+[out:json][timeout:90];
+(
+  nwr["amenity"="parking"]["fee"="no"](${box});
+  nwr["amenity"="parking"][!"fee"](${box});
+);
+out center tags;
+`.trim();
+}
+
 export async function fetchFreeParkingSpots(
   lat: number,
   lng: number,
   radiusMeters = 1000,
 ): Promise<ParkingSpot[]> {
-  const query = buildQuery(lat, lng, radiusMeters);
+  return parseOverpassElements(await runOverpassQuery(buildQuery(lat, lng, radiusMeters)));
+}
 
-  const response = await fetch(OVERPASS_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-  });
+// Start with the mirror that answered last, so one dead mirror does not cost
+// a full timeout on every request.
+let preferredEndpoint = 0;
 
-  if (!response.ok) {
-    throw new Error(`Overpass API error: ${response.status}`);
+export async function runOverpassQuery(
+  query: string,
+  timeoutMs = ENDPOINT_TIMEOUT_MS,
+): Promise<OverpassElement[]> {
+  const body = `data=${encodeURIComponent(query)}`;
+
+  let lastError: Error | null = null;
+  let elements: OverpassElement[] = [];
+
+  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
+    const endpointIndex = (preferredEndpoint + i) % OVERPASS_ENDPOINTS.length;
+    const endpoint = OVERPASS_ENDPOINTS[endpointIndex];
+    // An overloaded mirror can hold the connection open for a minute before
+    // answering 504, so give up early and try the next one.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        lastError = new Error(`Overpass API error: ${response.status}`);
+        continue;
+      }
+
+      const json = await response.json();
+      elements = json.elements ?? [];
+      lastError = null;
+      preferredEndpoint = endpointIndex;
+      break;
+    } catch (err) {
+      lastError = controller.signal.aborted
+        ? new Error('Overpass request timed out')
+        : err instanceof Error ? err : new Error('Overpass request failed');
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  const json = await response.json();
-  const elements: OverpassElement[] = json.elements ?? [];
+  if (lastError) throw lastError;
 
+  return elements;
+}
+
+const RESTRICTED_ACCESS = new Set(['private', 'customers', 'permit', 'delivery', 'no']);
+
+/** Turn raw Overpass elements into free (or possibly free) Ottawa/Gatineau spots. */
+export function parseOverpassElements(elements: OverpassElement[]): ParkingSpot[] {
   const spots: ParkingSpot[] = [];
   const seen = new Set<string>();
 
@@ -124,10 +232,16 @@ export async function fetchFreeParkingSpots(
     if (elLat == null || elLng == null) continue;
 
     const tags = el.tags ?? {};
+    const fee = tags['fee'];
 
-    // Skip paid parking
-    if (tags['fee'] === 'yes') continue;
-    if (tags['access'] === 'private' || tags['access'] === 'customers') continue;
+    // Any fee value other than "no" (e.g. "yes", "Mo-Fr 08:00-18:00") means paid at least sometimes
+    if (fee !== undefined && fee !== 'no') continue;
+    if (RESTRICTED_ACCESS.has(tags['access'] ?? '')) continue;
+
+    const type = parseSpotType(tags);
+    const feeUnknown = fee === undefined || tags['fee:conditional'] !== undefined;
+    // Untagged garages in Ottawa/Gatineau are nearly always paid
+    if (fee === undefined && type === 'garage') continue;
 
     const key = `${elLat.toFixed(5)}_${elLng.toFixed(5)}`;
     if (seen.has(key)) continue;
@@ -142,8 +256,9 @@ export async function fetchFreeParkingSpots(
       source: 'osm',
       lat: elLat,
       lng: elLng,
-      type: parseSpotType(tags),
+      type,
       feeRequired: false,
+      feeUnknown,
       timeRestrictions: extractTimeRestrictions(tags),
       seasonalBan: hasSeasonalBan(tags),
       occupied: false,
@@ -178,7 +293,7 @@ export function haversineMeters(
 }
 
 /**
- * Return the N nearest free (non-occupied) spots sorted by distance.
+ * Return the N nearest free (non-occupied, not banned right now) spots sorted by distance.
  */
 export function nearestFreeSpots(
   spots: ParkingSpot[],
@@ -188,7 +303,7 @@ export function nearestFreeSpots(
   excludeId?: string,
 ): ParkingSpot[] {
   return spots
-    .filter(s => !s.occupied && s.id !== excludeId)
+    .filter(s => !s.occupied && s.rule?.level !== 'banned' && s.id !== excludeId)
     .map(s => ({ spot: s, dist: haversineMeters(lat, lng, s.lat, s.lng) }))
     .sort((a, b) => a.dist - b.dist)
     .slice(0, n)

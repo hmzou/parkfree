@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,23 +18,31 @@ import { TimerBar } from '../_components/TimerBar';
 import { AddSpotModal } from '../_components/AddSpotModal';
 import { LocationSearchBar } from '../_components/LocationSearchBar';
 import { SearchResultCard } from '../_components/SearchResultCard';
+import { StayFinder } from '../_components/StayFinder';
+import { OverlayInfoCard } from '../_components/OverlayInfoCard';
+import { WinterBanner } from '../_components/WinterBanner';
+import { DirectionsModal } from '../_components/DirectionsModal';
+import type { OverlayInfo } from '../_components/mapStyle';
 
 import { useLocation } from '../_hooks/useLocation';
 import { useSpots } from '../_hooks/useSpots';
+import { useWinter } from '../_hooks/useWinter';
 import { useSessionContext } from '../_contexts/SessionContext';
 import { useLocale } from '../_contexts/LocaleContext';
 import { useTimer } from '../_hooks/useTimer';
+import { useParkedCar } from '../_hooks/useParkedCar';
 
 import { ParkingSpot, Coordinate } from '../_types';
 import { t } from '../_i18n';
-import { nearestFreeSpots } from '../_services/overpass';
-import { GeocodingResult, geocodeAddress } from '../_services/geocoding';
+import { detectCity, nearestFreeSpots } from '../_services/overpass';
+import { GeocodingResult } from '../_services/geocoding';
+import { CityLot, fetchCityLots } from '../_services/cityLots';
+import { parkedCarCoordinate } from '../_services/parkedCar';
 import {
   getBusinessParking,
   subscribeToLotOccupancy,
   BusinessParkingRecord,
 } from '../_services/businessParking';
-import { fetchFreeParkingSpots } from '../_services/overpass';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,15 +56,29 @@ interface BusinessOccupancyState {
   activeCount: number;
 }
 
+const CITY_LOTS_REFRESH_MS = 5 * 60 * 1000;
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   // Subscribe to locale so all t() calls re-evaluate on language switch
   useLocale();
 
   const { coordinate, permissionStatus, loading: locationLoading, requestPermission } = useLocation();
-  const { spots, loading: spotsLoading, isCached, error: spotsError, reportCounts, refresh } = useSpots();
+  const winter = useWinter();
+  const {
+    spots,
+    overlays,
+    coversRegion,
+    loading: spotsLoading,
+    isCached,
+    error: spotsError,
+    reportCounts,
+    now,
+    refresh,
+  } = useSpots({ ottawaBanLikely: !!winter.heavySnow });
   const { session, startParking, stopParking, loading: sessionLoading } = useSessionContext();
   const { timer, startTimer, stopTimer } = useTimer();
+  const { car, remember, forget } = useParkedCar();
 
   const mapRef = useRef<ParkFreeMapViewHandle>(null);
 
@@ -76,6 +99,52 @@ export default function MapScreen() {
   // ── Business occupancy state ──────────────────────────────────────────────────
   const [businessOccupancy, setBusinessOccupancy] = useState<BusinessOccupancyState | null>(null);
   const lotUnsubRef = useRef<(() => void) | null>(null);
+
+  const [cityLots, setCityLots] = useState<CityLot[]>([]);
+  const [overlayInfo, setOverlayInfo] = useState<OverlayInfo | null>(null);
+  const [stayFinderVisible, setStayFinderVisible] = useState(false);
+  const [confirmedOnly, setConfirmedOnly] = useState(false);
+  const [freeNow, setFreeNow] = useState(false);
+  const [carDirections, setCarDirections] = useState(false);
+
+  const visibleSpots = useMemo(
+    () => spots.filter(s => {
+      if (confirmedOnly && s.feeUnknown) return false;
+      // "Free right now" hides spots that are taken, banned, or not confirmed free
+      if (freeNow && (s.occupied || !s.rule || s.rule.level === 'banned' || s.rule.level === 'unclear')) return false;
+      return true;
+    }),
+    [spots, confirmedOnly, freeNow],
+  );
+  const parkedCoord = parkedCarCoordinate(car);
+
+  // An active session is the car location, including after the app restarts
+  useEffect(() => {
+    if (!session) return;
+    void remember({
+      lat: session.lat,
+      lng: session.lng,
+      label: `${session.spotType ?? 'Parking'} · ${session.spotCity ?? ''}`,
+      spotId: session.spotId,
+    });
+  }, [session, remember]);
+  // Where the user is looking: the last map centre, or their location
+  const viewCenter = searchCoord ?? coordinate;
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetchCityLots()
+        .then(lots => { if (!cancelled) setCityLots(lots); })
+        .catch(err => console.warn('City lots unavailable:', err));
+    };
+    load();
+    const id = setInterval(load, CITY_LOTS_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   // One-time initial fetch when GPS resolves
   const initialFetchRef = useRef(false);
@@ -127,12 +196,9 @@ export default function MapScreen() {
         mapRef.current?.flyTo(result.latitude, result.longitude, 15);
         setSearchMarker(searchCoordinate);
 
-        // Fetch fresh spots around the searched location (in parallel with business lookup)
-        const [freshSpots] = await Promise.all([
-          fetchFreeParkingSpots(result.latitude, result.longitude, 1500).catch(() => spots),
-        ]);
-
-        const spotsToSearch = freshSpots.length > 0 ? freshSpots : spots;
+        const freshSpots = await refresh(searchCoordinate, { force: true, radiusMeters: 1500 });
+        // The region dataset is already merged with rules and occupancy in `spots`
+        const spotsToSearch = coversRegion ? spots : (freshSpots ?? spots);
 
         // Find the nearest free spot to the searched location
         const nearest = nearestFreeSpots(spotsToSearch, result.latitude, result.longitude, 1);
@@ -171,7 +237,7 @@ export default function MapScreen() {
         setSearchLoading(false);
       }
     },
-    [spots],
+    [spots, refresh, coversRegion],
   );
 
   const handleDismissSearchResult = useCallback(() => {
@@ -184,7 +250,20 @@ export default function MapScreen() {
 
   // ── Spot interactions ────────────────────────────────────────────────────────
 
+  const handleOverlayPress = useCallback((info: OverlayInfo) => {
+    setSearchState(null);
+    setOverlayInfo(info);
+  }, []);
+
+  const handleStaySelect = useCallback((spot: ParkingSpot) => {
+    setStayFinderVisible(false);
+    setSelectedSpot(spot);
+    setExpandedSpotId(spot.id);
+    mapRef.current?.flyTo(spot.lat, spot.lng, 16);
+  }, []);
+
   const handleSpotPress = useCallback((spot: ParkingSpot) => {
+    setOverlayInfo(null);
     setSelectedSpot(prev => {
       if (prev?.id === spot.id) {
         setExpandedSpotId(spot.id);
@@ -213,6 +292,13 @@ export default function MapScreen() {
   const handleParkHere = useCallback(
     async (timerMinutes?: number, warnMinutes = 10) => {
       if (!selectedSpot) return;
+      const spotLabel = `${selectedSpot.type} · ${selectedSpot.city}`;
+      await remember({
+        lat: selectedSpot.lat,
+        lng: selectedSpot.lng,
+        label: spotLabel,
+        spotId: selectedSpot.id,
+      });
       try {
         await startParking(
           selectedSpot.id,
@@ -229,22 +315,45 @@ export default function MapScreen() {
         setSelectedSpot(null);
         setExpandedSpotId(null);
       } catch {
-        Alert.alert(t('errors.sessionFailed'), t('errors.retry'));
+        Alert.alert(t('errors.sessionFailed'), t('errors.carSavedAnyway'));
       }
     },
-    [selectedSpot, startParking, startTimer],
+    [selectedSpot, startParking, startTimer, remember],
   );
+
+  const handleToggleRememberCar = useCallback(async () => {
+    if (!selectedSpot) return;
+    if (car?.spotId === selectedSpot.id) {
+      await forget();
+      Alert.alert(t('car.forgotten'));
+      return;
+    }
+    await remember({
+      lat: selectedSpot.lat,
+      lng: selectedSpot.lng,
+      label: `${selectedSpot.type} · ${selectedSpot.city}`,
+      spotId: selectedSpot.id,
+    });
+    Alert.alert(t('car.saved'), t('car.savedHint'));
+  }, [selectedSpot, car?.spotId, remember, forget]);
+
+  const handleFindCar = useCallback(() => {
+    if (!car) return;
+    mapRef.current?.flyTo(car.lat, car.lng, 16);
+    setCarDirections(true);
+  }, [car]);
 
   const handleLeave = useCallback(async () => {
     try {
       // hitLimit = true if the countdown reached zero before the user tapped "Leave"
       const timerExpired = timer.active && timer.remainingSeconds === 0;
       await stopParking(timerExpired);
+      await forget();
       stopTimer();
     } catch {
       Alert.alert(t('errors.sessionFailed'), t('errors.retry'));
     }
-  }, [stopParking, stopTimer, timer]);
+  }, [stopParking, stopTimer, timer, forget]);
 
   // Map moved: store coord + show "Search" pill. Do NOT auto-search.
   const handleMapMoved = useCallback((coord: Coordinate) => {
@@ -255,7 +364,7 @@ export default function MapScreen() {
   const handleSearchThisArea = useCallback(async () => {
     if (!searchCoord) return;
     setShowSearchBtn(false);
-    await refresh(searchCoord);
+    await refresh(searchCoord, { force: true });
   }, [searchCoord, refresh]);
 
   const handleLongPress = useCallback((coord: Coordinate) => {
@@ -263,9 +372,11 @@ export default function MapScreen() {
     setAddSpotVisible(true);
   }, []);
 
-  const handleOpenSettings = useCallback(() => {
-    Linking.openSettings();
-  }, []);
+  // Web can re-prompt; native apps must send the user to Settings once denied.
+  const handleEnableLocation = useCallback(() => {
+    if (Platform.OS === 'web') void requestPermission();
+    else void Linking.openSettings();
+  }, [requestPermission]);
 
   // Build a human-readable spot label for the session bar
   const sessionSpotLabel = session
@@ -284,20 +395,6 @@ export default function MapScreen() {
       ? { activeCount: businessOccupancy.activeCount, capacity: businessOccupancy.record.capacity }
       : null;
 
-  // ── Location denied screen ──────────────────────────────────────────────────
-  if (permissionStatus === 'denied') {
-    return (
-      <View style={styles.centerScreen}>
-        <Ionicons name="location-outline" size={56} color="#00C853" />
-        <Text style={styles.permTitle}>{t('map.locationDenied')}</Text>
-        <Text style={styles.permMsg}>{t('map.locationDeniedMessage')}</Text>
-        <TouchableOpacity style={styles.settingsBtn} onPress={handleOpenSettings}>
-          <Text style={styles.settingsBtnText}>{t('map.openSettings')}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
   // ── Loading screen ──────────────────────────────────────────────────────────
   if (locationLoading) {
     return (
@@ -314,18 +411,23 @@ export default function MapScreen() {
       <ParkFreeMapView
         ref={mapRef}
         userCoordinate={coordinate}
-        spots={spots}
+        spots={visibleSpots}
         selectedSpotId={selectedSpot?.id ?? null}
         isCached={isCached}
         reportCounts={reportCounts}
         searchMarker={searchMarker}
+        parkedCar={parkedCoord}
+        overlays={overlays}
+        cityLots={cityLots}
+        showWinterParking={winter.ottawaSeason}
         onSpotPress={handleSpotPress}
+        onOverlayPress={handleOverlayPress}
         onMapMoved={handleMapMoved}
         onLongPress={handleLongPress}
       />
 
-      {/* ── Top overlay: app name + search bar ─────────────────────────────── */}
-      <View style={[styles.topOverlay, { top: insets.top + 8 }]}>
+      {/* ── Top overlay: app name, search, filters and cards, stacked ─────── */}
+      <View style={[styles.topOverlay, { top: insets.top + 8 }]} pointerEvents="box-none">
         {/* App name row */}
         <View style={styles.appNameRow}>
           <Text style={styles.appName}>{t('appName')}</Text>
@@ -338,7 +440,7 @@ export default function MapScreen() {
           {spotsError && (
             <TouchableOpacity
               style={styles.errorChip}
-              onPress={() => refresh(coordinate)}
+              onPress={() => { void refresh(coordinate, { force: true }); }}
             >
               <Ionicons name="refresh" size={14} color="#F44336" />
               <Text style={styles.errorChipText}>{t('errors.retry')}</Text>
@@ -348,47 +450,106 @@ export default function MapScreen() {
 
         {/* Search bar */}
         <LocationSearchBar onSelectResult={handleSearchSelect} />
-      </View>
 
-      {/* Offline / cached banner */}
-      {isCached && !spotsLoading && (
-        <View style={[styles.offlineBanner, { top: insets.top + 106 }]}>
-          <Ionicons name="cloud-offline-outline" size={14} color="#FFB300" />
-          <Text style={styles.offlineBannerText}>
-            {t('errors.fetchFailed')} — showing cached spots
-          </Text>
+        {/* Quick actions */}
+        <View style={styles.chipRow} pointerEvents="box-none">
+          <TouchableOpacity
+            style={styles.chip}
+            onPress={() => setStayFinderVisible(true)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="hourglass-outline" size={14} color="#00C853" />
+            <Text style={styles.chipText}>{t('map.stayFor')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.chip, freeNow && styles.chipActive]}
+            onPress={() => setFreeNow(v => !v)}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name={freeNow ? 'checkmark-circle' : 'leaf-outline'}
+              size={14}
+              color={freeNow ? '#111' : '#00C853'}
+            />
+            <Text style={[styles.chipText, freeNow && styles.chipTextActive]}>
+              {t('map.freeNow')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.chip, confirmedOnly && styles.chipActive]}
+            onPress={() => setConfirmedOnly(v => !v)}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name={confirmedOnly ? 'checkmark-circle' : 'checkmark-circle-outline'}
+              size={14}
+              color={confirmedOnly ? '#111' : '#00C853'}
+            />
+            <Text style={[styles.chipText, confirmedOnly && styles.chipTextActive]}>
+              {t('map.confirmedOnly')}
+            </Text>
+          </TouchableOpacity>
+          {car && !session && (
+            <TouchableOpacity style={styles.chip} onPress={handleFindCar} activeOpacity={0.85}>
+              <Ionicons name="car-sport-outline" size={14} color="#FF6D00" />
+              <Text style={styles.chipText}>{t('map.findCar')}</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      )}
 
-      {/* Empty state */}
-      {!spotsLoading && !spotsError && spots.length === 0 && !isCached && !searchState && (
-        <View style={[styles.emptyBanner, { top: insets.top + 106 }]}>
-          <Ionicons name="search-outline" size={14} color="#AAA" />
-          <Text style={styles.emptyBannerText}>{t('map.noSpotsFound')}</Text>
-        </View>
-      )}
+        {/* Without location the map still works, centred on downtown Ottawa */}
+        {permissionStatus === 'denied' && (
+          <TouchableOpacity style={styles.offlineBanner} onPress={handleEnableLocation} activeOpacity={0.85}>
+            <Ionicons name="location-outline" size={14} color="#00C853" />
+            <Text style={[styles.offlineBannerText, { flex: 1 }]} numberOfLines={1}>{t('map.locationOff')}</Text>
+            <Text style={styles.locationEnableText}>{t('map.enableLocation')}</Text>
+          </TouchableOpacity>
+        )}
 
-      {/* "Search this area" pill */}
-      {showSearchBtn && !spotsLoading && (
-        <TouchableOpacity
-          style={[styles.searchPill, { top: insets.top + 112 }]}
-          onPress={handleSearchThisArea}
-          activeOpacity={0.88}
-        >
-          <Ionicons name="search" size={15} color="#111" />
-          <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
-        </TouchableOpacity>
-      )}
-      {showSearchBtn && spotsLoading && (
-        <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 112 }]}>
-          <ActivityIndicator size="small" color="#111" />
-          <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
-        </View>
-      )}
+        <WinterBanner
+          status={winter}
+          nearGatineau={detectCity(viewCenter.latitude, viewCenter.longitude) === 'Gatineau'}
+          now={now}
+        />
 
-      {/* Search result card */}
-      {searchState && !searchLoading && (
-        <View style={[styles.searchResultContainer, { top: insets.top + 114 }]}>
+        {/* Offline / cached banner */}
+        {isCached && !spotsLoading && (
+          <View style={styles.offlineBanner}>
+            <Ionicons name="cloud-offline-outline" size={14} color="#FFB300" />
+            <Text style={styles.offlineBannerText}>
+              {t('errors.fetchFailed')} — {t('errors.showingCached')}
+            </Text>
+          </View>
+        )}
+
+        {/* Empty state */}
+        {!spotsLoading && !spotsError && spots.length === 0 && !isCached && !searchState && (
+          <View style={styles.emptyBanner}>
+            <Ionicons name="search-outline" size={14} color="#AAA" />
+            <Text style={styles.emptyBannerText}>{t('map.noSpotsFound')}</Text>
+          </View>
+        )}
+
+        {/* "Search this area" pill — only needed without the region dataset */}
+        {!coversRegion && showSearchBtn && !spotsLoading && (
+          <TouchableOpacity
+            style={styles.searchPill}
+            onPress={handleSearchThisArea}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="search" size={15} color="#111" />
+            <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+          </TouchableOpacity>
+        )}
+        {!coversRegion && showSearchBtn && spotsLoading && (
+          <View style={[styles.searchPill, styles.searchPillLoading]}>
+            <ActivityIndicator size="small" color="#111" />
+            <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
+          </View>
+        )}
+
+        {/* Search result card */}
+        {searchState && !searchLoading && (
           <SearchResultCard
             searchedLat={searchState.result.latitude}
             searchedLng={searchState.result.longitude}
@@ -397,8 +558,13 @@ export default function MapScreen() {
             onDismiss={handleDismissSearchResult}
             onSelectSpot={handleSelectNearestSpot}
           />
-        </View>
-      )}
+        )}
+
+        {/* Tapped city layer */}
+        {overlayInfo && !searchState && (
+          <OverlayInfoCard info={overlayInfo} onDismiss={() => setOverlayInfo(null)} />
+        )}
+      </View>
 
       {/* FAB — Add Spot (hidden during active session) */}
       {!session && (
@@ -421,6 +587,7 @@ export default function MapScreen() {
           sessionStartTime={session.startTime}
           spotLabel={sessionSpotLabel}
           onLeave={handleLeave}
+          onFindCar={handleFindCar}
           loading={sessionLoading}
         />
       )}
@@ -439,6 +606,24 @@ export default function MapScreen() {
         reportCounts={reportCounts}
         businessOccupancy={spotBusinessOccupancy}
         onSelectNearestSpot={handleSelectNearestSpot}
+        carRemembered={!!selectedSpot && car?.spotId === selectedSpot.id}
+        onToggleRememberCar={handleToggleRememberCar}
+        now={now}
+      />
+
+      <DirectionsModal
+        visible={carDirections}
+        target={car ? { lat: car.lat, lng: car.lng, label: car.label } : null}
+        onClose={() => setCarDirections(false)}
+      />
+
+      <StayFinder
+        visible={stayFinderVisible}
+        spots={visibleSpots}
+        origin={viewCenter}
+        now={now}
+        onSelect={handleStaySelect}
+        onClose={() => setStayFinderVisible(false)}
       />
 
       {/* Add spot modal */}
@@ -464,30 +649,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 32,
     gap: 16,
-  },
-  permTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  permMsg: {
-    fontSize: 15,
-    color: '#AAA',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  settingsBtn: {
-    backgroundColor: '#00C853',
-    borderRadius: 14,
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    marginTop: 8,
-  },
-  settingsBtnText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
   },
   loadingText: {
     color: '#AAA',
@@ -535,9 +696,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  // ── Quick action chips ──────────────────────────────────────────────────────
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(26,26,26,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,200,83,0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+  chipActive: {
+    backgroundColor: '#00C853',
+    borderColor: '#00C853',
+  },
+  chipText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  chipTextActive: {
+    color: '#111',
+  },
   // ── Banners ─────────────────────────────────────────────────────────────────
   offlineBanner: {
-    position: 'absolute',
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -549,13 +738,17 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 20,
   },
+  locationEnableText: {
+    color: '#00C853',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   offlineBannerText: {
     color: '#FFB300',
     fontSize: 12,
     fontWeight: '500',
   },
   emptyBanner: {
-    position: 'absolute',
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -571,7 +764,6 @@ const styles = StyleSheet.create({
   },
   // ── Search this area pill ───────────────────────────────────────────────────
   searchPill: {
-    position: 'absolute',
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -593,12 +785,6 @@ const styles = StyleSheet.create({
     color: '#111',
     fontWeight: '700',
     fontSize: 14,
-  },
-  // ── Search result card ──────────────────────────────────────────────────────
-  searchResultContainer: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
   },
   // ── FAB ─────────────────────────────────────────────────────────────────────
   fab: {

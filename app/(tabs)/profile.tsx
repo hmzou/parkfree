@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { t } from '../_i18n';
 import { useSessionContext } from '../_contexts/SessionContext';
 import { useLocale } from '../_contexts/LocaleContext';
+import { countUserSessions } from '../_services/firebase';
+import { legendItems, MAP_COLORS } from '../_components/mapStyle';
 
 const APP_VERSION = '1.0.0';
 
@@ -21,6 +23,19 @@ export default function ProfileScreen() {
   const { locale, setLocale } = useLocale();
 
   const shortId = userId ? userId.slice(0, 12) + '…' : '—';
+
+  const [sessionCount, setSessionCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    countUserSessions(userId)
+      .then(count => { if (!cancelled) setSessionCount(count); })
+      .catch((err) => {
+        console.warn('Session count error:', err);
+        if (!cancelled) setSessionCount(null);
+      });
+    return () => { cancelled = true; };
+  }, [userId, session?.id]);
 
   return (
     <ScrollView
@@ -48,7 +63,7 @@ export default function ProfileScreen() {
 
         <View style={styles.row}>
           <Text style={styles.rowLabel}>{t('profile.sessionsParked')}</Text>
-          <Text style={styles.rowValue}>{session ? '1' : '0'}</Text>
+          <Text style={styles.rowValue}>{sessionCount ?? '—'}</Text>
         </View>
       </View>
 
@@ -89,16 +104,18 @@ export default function ProfileScreen() {
           <Text style={styles.cardTitle}>{t('map.legend')}</Text>
         </View>
 
-        {[
-          { color: '#4CAF50', label: t('map.legendFree') },
-          { color: '#FFB300', label: t('map.legendTimeLimited') },
-          { color: '#9E9E9E', label: t('map.legendPermit') },
-          { color: '#FF5722', label: t('map.legendOther') },
-          { color: '#F44336', label: t('map.legendOccupied') },
-        ].map(item => (
-          <View key={item.color} style={styles.legendRow}>
-            <View style={[styles.legendDot, { backgroundColor: item.color }]} />
-            <Text style={styles.legendLabel}>{item.label}</Text>
+        {legendItems(true, true).map(item => (
+          <View key={item.key} style={styles.legendRow}>
+            <View
+              style={[
+                styles.legendDot,
+                item.shape === 'line' && styles.legendLine,
+                item.shape === 'ring'
+                  ? { backgroundColor: MAP_COLORS.unclearFill, borderColor: item.color, borderWidth: 2 }
+                  : { backgroundColor: item.color },
+              ]}
+            />
+            <Text style={styles.legendLabel}>{t(item.key)}</Text>
           </View>
         ))}
       </View>
@@ -205,6 +222,11 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
+  },
+  legendLine: {
+    width: 16,
+    height: 4,
+    borderRadius: 2,
   },
   legendLabel: {
     color: '#CCC',

@@ -1,11 +1,11 @@
 {
   "indexes": [
     {
-      "collectionGroup": "spots",
+      "collectionGroup": "sessions",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "feeRequired", "order": "ASCENDING" },
-        { "fieldPath": "occupied", "order": "ASCENDING" }
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" }
       ]
     },
     {
@@ -13,7 +13,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "active", "order": "ASCENDING" }
+        { "fieldPath": "startTime", "order": "DESCENDING" }
       ]
     },
     {
@@ -30,13 +30,6 @@
       "fields": [
         { "fieldPath": "spotId", "order": "ASCENDING" },
         { "fieldPath": "active", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "businessParking",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "nameLower", "order": "ASCENDING" }
       ]
     }
   ],

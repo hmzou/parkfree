@@ -7,8 +7,11 @@ import {
   getActiveSession,
   markSpotOccupied,
   markSpotFree,
+  joinSpotOccupants,
+  leaveSpotOccupants,
   subscribeToAuthState,
 } from '../_services/firebase';
+import { computeOccupiedUntil } from '../_services/occupancy';
 import {
   requestNotificationPermissions,
   scheduleWarningNotification,
@@ -42,15 +45,14 @@ export function useSession(): UseSessionResult {
   // Init auth + restore active session
   useEffect(() => {
     const unsub = subscribeToAuthState(async (user) => {
-      if (user) {
-        setUserId(user.uid);
-        const active = await getActiveSession(user.uid);
-        setSession(active);
-      } else {
-        const authed = await ensureAnonymousAuth();
+      try {
+        const authed = user ?? await ensureAnonymousAuth();
         setUserId(authed.uid);
-        const active = await getActiveSession(authed.uid);
-        setSession(active);
+        setSession(await getActiveSession(authed.uid));
+      } catch (err) {
+        // Firestore can be unreachable; the map still works without a session.
+        console.warn('Could not restore parking session:', err);
+        setSession(null);
       }
     });
 
@@ -71,8 +73,6 @@ export function useSession(): UseSessionResult {
       try {
         const user = await ensureAnonymousAuth();
 
-        await markSpotOccupied(spotId, user.uid);
-
         const sessionId = await startSession(
           spotId,
           user.uid,
@@ -85,6 +85,16 @@ export function useSession(): UseSessionResult {
         );
 
         const now = new Date();
+        const occupiedUntil = computeOccupiedUntil(now, timerMinutes);
+
+        try {
+          await markSpotOccupied(spotId, user.uid, occupiedUntil);
+          await joinSpotOccupants(spotId, user.uid, occupiedUntil).catch(() => null);
+        } catch (err) {
+          await endSession(sessionId).catch(() => null);
+          throw err;
+        }
+
         const newSession: ParkingSession = {
           id: sessionId,
           spotId,
@@ -134,13 +144,15 @@ export function useSession(): UseSessionResult {
     if (!session) return;
     setLoading(true);
     try {
-      await markSpotFree(session.spotId);
-      await endSession(session.id, hitLimit);
+      // The local session clears even when Firestore rejects the write, so a
+      // network or rules failure cannot trap the user in "I'm parked".
+      await endSession(session.id, hitLimit).catch(err => {
+        console.warn('Could not end session on the server:', err);
+      });
+      await markSpotFree(session.spotId).catch(() => null);
+      await leaveSpotOccupants(session.spotId, session.userId).catch(() => null);
       await cancelAllNotifications();
       setSession(null);
-    } catch (err) {
-      console.error('stopParking error:', err);
-      throw err;
     } finally {
       setLoading(false);
     }

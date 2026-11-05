@@ -1,3 +1,5 @@
+import type { RuleVerdict } from '../_services/parkingRules';
+
 export type SpotSource = 'osm' | 'user';
 export type SpotType = 'street' | 'lot' | 'garage';
 export type City = 'Ottawa' | 'Gatineau' | 'Unknown';
@@ -10,14 +12,19 @@ export interface ParkingSpot {
   lng: number;
   type: SpotType;
   feeRequired: boolean;
+  /** OSM has no fee tag, so the spot may still be paid */
+  feeUnknown?: boolean;
   timeRestrictions: string | null;
   seasonalBan: boolean;
   occupied: boolean;
   occupiedSince: Date | null;
   occupiedBy: string | null;
+  occupiedUntil?: Date | null;
   city: City;
   verified?: boolean;
   notes?: string;
+  /** City rules in force right now, filled in by useSpots */
+  rule?: RuleVerdict;
 }
 
 export interface ParkingSession {
@@ -43,6 +50,7 @@ export interface UserSpotSubmission {
   type: SpotType;
   notes: string;
   timeRestrictions: string | null;
+  city: City;
   createdAt: Date;
   verified: boolean;
 }

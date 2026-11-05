@@ -1,90 +1,29 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
-import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import type { MapState, ShapeSource as ShapeSourceType } from '@rnmapbox/maps';
 import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
-import { t } from '../_i18n';
-import { Ionicons } from '@expo/vector-icons';
+import type { CityLot } from '../_services/cityLots';
+import { MapLegend } from './MapLegend';
+import {
+  buildOverlayGeoJSON,
+  buildSpotsGeoJSON,
+  LINE_OPACITY,
+  LINE_WIDTH,
+  LINE_SORT_KEY,
+  LINE_OFFSET,
+  OVERLAY_MIN_ZOOM,
+  OverlayInfo,
+} from './mapStyle';
 
-MapboxGL.setAccessToken(
+// Expo Router evaluates every file under app/ on web too, where Metro resolves
+// @rnmapbox/maps to an empty module.
+MapboxGL?.setAccessToken?.(
   (Constants.expoConfig?.extra?.mapboxAccessToken as string) ?? '',
 );
 
 const ATTRIBUTION_POSITION = { bottom: 8, right: 8 };
-
-// ─── Pin color helpers ─────────────────────────────────────────────────────────
-
-function getPinColor(spot: ParkingSpot, reportCount: number): string {
-  if (spot.occupied) return '#F44336';
-  if (reportCount >= 2) return '#FF5722';
-  if (reportCount === 1) return '#FFB300';
-  if (spot.feeRequired) return '#9E9E9E';
-  if (spot.seasonalBan) return '#FF5722';
-  if (spot.timeRestrictions) return '#FFB300';
-  return '#4CAF50';
-}
-
-// Convert spots array to a GeoJSON FeatureCollection for ShapeSource
-function buildGeoJSON(
-  spots: ParkingSpot[],
-  selectedId: string | null,
-  reportCounts: Record<string, number>,
-): GeoJSON.FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: spots.map(spot => ({
-      type: 'Feature' as const,
-      id: spot.id,
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [spot.lng, spot.lat],
-      },
-      properties: {
-        id: spot.id,
-        pinColor: getPinColor(spot, reportCounts[spot.id] ?? 0),
-        selected: spot.id === selectedId ? 1 : 0,
-      },
-    })),
-  };
-}
-
-// ─── Legend ────────────────────────────────────────────────────────────────────
-
-const LEGEND_ITEMS = [
-  { color: '#4CAF50', key: 'map.legendFree' },
-  { color: '#FFB300', key: 'map.legendTimeLimited' },
-  { color: '#9E9E9E', key: 'map.legendPermit' },
-  { color: '#FF5722', key: 'map.legendOther' },
-  { color: '#F44336', key: 'map.legendOccupied' },
-];
-
-// Not memoized — needs to re-render when locale changes so t() calls update
-const MapLegend: React.FC = () => {
-  const [open, setOpen] = useState(false);
-  return (
-    <View style={styles.legendContainer}>
-      <TouchableOpacity
-        style={styles.legendToggle}
-        onPress={() => setOpen(v => !v)}
-        activeOpacity={0.85}
-      >
-        <Ionicons name={open ? 'close' : 'information-circle-outline'} size={18} color="#fff" />
-        {!open && <Text style={styles.legendToggleText}>{t('map.legend')}</Text>}
-      </TouchableOpacity>
-      {open && (
-        <View style={styles.legendPanel}>
-          {LEGEND_ITEMS.map(item => (
-            <View key={item.color} style={styles.legendRow}>
-              <View style={[styles.legendDot, { backgroundColor: item.color }]} />
-              <Text style={styles.legendLabel}>{t(item.key)}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-};
 
 // ─── ParkFreeMapView ──────────────────────────────────────────────────────────
 
@@ -100,7 +39,15 @@ interface Props {
   reportCounts: Record<string, number>;
   /** Optional marker coordinate for a searched location */
   searchMarker?: Coordinate | null;
+  /** Where the user left the car, drawn until they say they moved it */
+  parkedCar?: Coordinate | null;
+  /** City of Ottawa parking layers */
+  overlays: GeoJSON.FeatureCollection;
+  cityLots: CityLot[];
+  /** Show winter-ban alternate parking (only useful in winter) */
+  showWinterParking: boolean;
   onSpotPress: (spot: ParkingSpot) => void;
+  onOverlayPress: (info: OverlayInfo) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
 }
@@ -112,11 +59,17 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   isCached,
   reportCounts,
   searchMarker,
+  parkedCar,
+  overlays,
+  cityLots,
+  showWinterParking,
   onSpotPress,
+  onOverlayPress,
   onMapMoved,
   onLongPress,
 }, ref) => {
   const cameraRef = useRef<MapboxGL.Camera>(null);
+  const [showOverlays, setShowOverlays] = useState(true);
 
   useImperativeHandle(ref, () => ({
     flyTo: (latitude: number, longitude: number, zoomLevel = 15) => {
@@ -129,6 +82,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   }));
   const sourceRef = useRef<ShapeSourceType>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipInitialIdleRef = useRef(true);
 
   const cameraDefaultSettings = useMemo(
     () => ({
@@ -140,8 +94,13 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   );
 
   const geoJSON = useMemo(
-    () => buildGeoJSON(spots, selectedSpotId, reportCounts),
+    () => buildSpotsGeoJSON(spots, selectedSpotId, reportCounts),
     [spots, selectedSpotId, reportCounts],
+  );
+
+  const overlayGeoJSON = useMemo(
+    () => buildOverlayGeoJSON(overlays, cityLots, showWinterParking),
+    [overlays, cityLots, showWinterParking],
   );
 
   // Point opacity: 0.5 for cached, 1.0 for fresh
@@ -158,6 +117,10 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
       const newCoord: Coordinate = { latitude: lat, longitude: lng };
       if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
       regionDebounceRef.current = setTimeout(() => {
+        if (skipInitialIdleRef.current) {
+          skipInitialIdleRef.current = false;
+          return;
+        }
         onMapMoved(newCoord);
       }, 450);
     },
@@ -214,6 +177,19 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
     [spots, onSpotPress],
   );
 
+  const handleOverlayPress = useCallback(
+    (event: { features: GeoJSON.Feature[]; coordinates?: { latitude: number; longitude: number } }) => {
+      const properties = event.features?.[0]?.properties;
+      if (!properties?.kind) return;
+      onOverlayPress({
+        ...(properties as OverlayInfo),
+        tapLat: event.coordinates?.latitude,
+        tapLng: event.coordinates?.longitude,
+      });
+    },
+    [onOverlayPress],
+  );
+
   return (
     <View style={styles.container}>
       <MapboxGL.MapView
@@ -230,6 +206,59 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
 
         {/* User location dot */}
         <MapboxGL.UserLocation visible />
+
+        {/* City parking rules, drawn under the spot pins */}
+        {showOverlays && (
+          <MapboxGL.ShapeSource
+            id="overlays-source"
+            shape={overlayGeoJSON}
+            onPress={handleOverlayPress}
+            // Street lines are thin; widen the touch target
+            hitbox={{ width: 24, height: 24 }}
+          >
+            <MapboxGL.FillLayer
+              id="overlay-fill"
+              minZoomLevel={OVERLAY_MIN_ZOOM}
+              filter={['==', ['geometry-type'], 'Polygon']}
+              style={{ fillColor: ['get', 'color'], fillOpacity: 0.35 }}
+            />
+            <MapboxGL.LineLayer
+              id="overlay-line"
+              minZoomLevel={OVERLAY_MIN_ZOOM}
+              filter={['==', ['geometry-type'], 'LineString']}
+              style={{
+                lineColor: ['get', 'color'],
+                lineWidth: LINE_WIDTH,
+                lineOpacity: LINE_OPACITY,
+                lineCap: 'round',
+                lineSortKey: LINE_SORT_KEY as any,
+                lineOffset: LINE_OFFSET as any,
+              }}
+            />
+            <MapboxGL.CircleLayer
+              id="overlay-lot"
+              filter={['==', ['get', 'kind'], 'cityLot']}
+              style={{
+                circleColor: ['get', 'color'],
+                circleRadius: 11,
+                circleStrokeColor: '#fff',
+                circleStrokeWidth: 1.5,
+              }}
+            />
+            <MapboxGL.SymbolLayer
+              id="overlay-lot-label"
+              filter={['==', ['get', 'kind'], 'cityLot']}
+              style={{
+                textField: ['get', 'label'],
+                textSize: 11,
+                textColor: '#fff',
+                textOffset: [0, 1.6],
+                textHaloColor: '#000',
+                textHaloWidth: 1,
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        )}
 
         {/* Clustered parking spot pins */}
         <MapboxGL.ShapeSource
@@ -282,7 +311,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
             style={{
               circleColor: ['get', 'pinColor'],
               circleRadius: 14,
-              circleStrokeColor: '#fff',
+              circleStrokeColor: ['get', 'pinStroke'],
               circleStrokeWidth: 3,
               circleOpacity: pointOpacity,
               circleStrokeOpacity: pointOpacity,
@@ -295,7 +324,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
             style={{
               circleColor: ['get', 'pinColor'],
               circleRadius: 9,
-              circleStrokeColor: '#fff',
+              circleStrokeColor: ['get', 'pinStroke'],
               circleStrokeWidth: 2,
               circleOpacity: pointOpacity,
               circleStrokeOpacity: pointOpacity,
@@ -304,6 +333,40 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
         </MapboxGL.ShapeSource>
 
         {/* Search location marker */}
+        {parkedCar && (
+          <MapboxGL.ShapeSource
+            id="parked-car-source"
+            shape={{
+              type: 'FeatureCollection',
+              features: [{
+                type: 'Feature',
+                id: 'parked-car',
+                geometry: { type: 'Point', coordinates: [parkedCar.longitude, parkedCar.latitude] },
+                properties: {},
+              }],
+            }}
+          >
+            <MapboxGL.CircleLayer
+              id="parked-car-halo"
+              style={{
+                circleColor: 'rgba(255,109,0,0.25)',
+                circleRadius: 22,
+                circleStrokeColor: '#FF6D00',
+                circleStrokeWidth: 2,
+              }}
+            />
+            <MapboxGL.CircleLayer
+              id="parked-car-dot"
+              style={{
+                circleColor: '#FF6D00',
+                circleRadius: 8,
+                circleStrokeColor: '#fff',
+                circleStrokeWidth: 2,
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        )}
+
         {searchMarker && (
           <MapboxGL.ShapeSource
             id="search-marker-source"
@@ -344,8 +407,11 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
         )}
       </MapboxGL.MapView>
 
-      {/* Pin color legend */}
-      <MapLegend />
+      <MapLegend
+        showOverlays={showOverlays}
+        onToggleOverlays={setShowOverlays}
+        showWinterParking={showWinterParking}
+      />
     </View>
   );
 });
@@ -356,56 +422,5 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
-  },
-  legendContainer: {
-    position: 'absolute',
-    bottom: 80,
-    left: 12,
-  },
-  legendToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(26,26,26,0.92)',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  legendToggleText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  legendPanel: {
-    marginTop: 6,
-    backgroundColor: 'rgba(26,26,26,0.95)',
-    borderRadius: 12,
-    padding: 10,
-    gap: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 6,
-    minWidth: 160,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  legendLabel: {
-    color: '#CCC',
-    fontSize: 12,
   },
 });

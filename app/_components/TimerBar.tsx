@@ -11,6 +11,7 @@ interface Props {
   /** Human-readable spot description, e.g. "Street parking · Ottawa" */
   spotLabel?: string;
   onLeave: () => void;
+  onFindCar?: () => void;
   loading?: boolean;
 }
 
@@ -35,7 +36,7 @@ function formatElapsed(startTime: Date): string {
   return formatDuration(secs);
 }
 
-export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, spotLabel, onLeave, loading }) => {
+export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, spotLabel, onLeave, onFindCar, loading }) => {
   // Subscribe to locale so t() calls update when language changes
   useLocale();
 
@@ -90,6 +91,12 @@ export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, spotLabel, 
           </View>
           <Text style={[styles.time, { color: barColor }]}>{timeDisplay}</Text>
         </View>
+
+        {onFindCar && (
+          <TouchableOpacity style={styles.findBtn} onPress={onFindCar} activeOpacity={0.8}>
+            <Ionicons name="locate" size={18} color="#FF6D00" />
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={[styles.leaveBtn, loading && styles.leaveBtnDisabled]}
@@ -154,6 +161,17 @@ const styles = StyleSheet.create({
   time: {
     fontSize: 18,
     fontWeight: '700',
+  },
+  findBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,109,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,109,0,0.35)',
+    marginRight: 8,
   },
   leaveBtn: {
     flexDirection: 'row',
