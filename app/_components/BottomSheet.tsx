@@ -22,10 +22,9 @@ import { submitOccupancyReport, ensureAnonymousAuth } from '../_services/firebas
 import { useLocale } from '../_contexts/LocaleContext';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-// 3 snap points: PEEK (spot name only), HALF (full details), FULL
+// 3 snap points: PEEK (spot name only), HALF (full details), FULL (container − 100)
 const SNAP_PEEK = 110;
 const SNAP_HALF = 320;
-const SNAP_FULL = SCREEN_HEIGHT - 100;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,6 +64,9 @@ interface Props {
     capacity: number;
   } | null;
   onSelectNearestSpot?: (spot: ParkingSpot) => void;
+  /** Height of the screen area the sheet lives in (above the tab bar). Without it
+   *  the sheet falls back to the window height and slides under the tab bar on web. */
+  containerHeight?: number;
 }
 
 export const SpotBottomSheet: React.FC<Props> = ({
@@ -80,12 +82,13 @@ export const SpotBottomSheet: React.FC<Props> = ({
   reportCounts,
   businessOccupancy,
   onSelectNearestSpot,
+  containerHeight,
 }) => {
   // Subscribe to locale changes so all t() calls update on language switch
   useLocale();
 
   const sheetRef = useRef<RNBottomSheet>(null);
-  const snapPoints = [SNAP_PEEK, SNAP_HALF, SNAP_FULL];
+  const snapPoints = [SNAP_PEEK, SNAP_HALF, (containerHeight ?? SCREEN_HEIGHT) - 100];
 
   const [directionsVisible, setDirectionsVisible] = useState(false);
   const [timerEnabled, setTimerEnabled] = useState(false);
@@ -94,7 +97,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
   const [warnMins, setWarnMins] = useState('10');
   const [parking, setParking] = useState(false);
   const [reportedThisSession, setReportedThisSession] = useState(false);
-  const [snapIndex, setSnapIndex] = useState(-1);
+  const [snapIndex, setSnapIndex] = useState(0);
 
   // Open/close sheet and reset local state whenever the selected spot changes.
   useEffect(() => {
@@ -196,7 +199,10 @@ export const SpotBottomSheet: React.FC<Props> = ({
     <>
       <RNBottomSheet
         ref={sheetRef}
-        index={-1}
+        // Only mounted while a spot is selected, so mount open: snapping a sheet
+        // that has not measured itself yet is silently ignored.
+        index={0}
+        containerHeight={containerHeight}
         snapPoints={snapPoints}
         enablePanDownToClose
         onClose={onClose}

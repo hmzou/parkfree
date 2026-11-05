@@ -63,6 +63,8 @@ export default function MapScreen() {
   const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
   const [addSpotVisible, setAddSpotVisible] = useState(false);
   const [addSpotCoord, setAddSpotCoord] = useState<Coordinate | null>(null);
+  // Measured screen height (above the tab bar) for the bottom sheet's container
+  const [screenHeight, setScreenHeight] = useState<number | undefined>(undefined);
 
   // "Search this area" pill
   const [searchCoord, setSearchCoord] = useState<Coordinate | null>(null);
@@ -302,7 +304,7 @@ export default function MapScreen() {
   }
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={e => setScreenHeight(e.nativeEvent.layout.height)}>
       {/* Map */}
       <ParkFreeMapView
         ref={mapRef}
@@ -445,6 +447,7 @@ export default function MapScreen() {
         reportCounts={reportCounts}
         businessOccupancy={spotBusinessOccupancy}
         onSelectNearestSpot={handleSelectNearestSpot}
+        containerHeight={screenHeight}
       />
 
       {/* Add spot modal */}
