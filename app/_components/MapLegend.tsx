@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { t } from '../_i18n';
+import { JUST_FREED_COLOR } from './spotGeoJSON';
 
 const LEGEND_ITEMS = [
+  { color: JUST_FREED_COLOR, key: 'map.legendJustFreed' },
   { color: '#4CAF50', key: 'map.legendFree' },
   { color: '#FFB300', key: 'map.legendTimeLimited' },
   { color: '#9E9E9E', key: 'map.legendPermit' },

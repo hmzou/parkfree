@@ -2,8 +2,15 @@ import { ParkingSpot } from '../_types';
 
 // ─── Pin color helpers ─────────────────────────────────────────────────────────
 
+/** Spot someone just left or reported open — the best odds of finding a space */
+export const JUST_FREED_COLOR = '#00E5FF';
+
+/** "Find my car" marker */
+export const CAR_MARKER_COLOR = '#7C4DFF';
+
 export function getPinColor(spot: ParkingSpot, reportCount: number): string {
   if (spot.occupied) return '#F44336';
+  if (spot.freedAt) return JUST_FREED_COLOR;
   if (reportCount >= 2) return '#FF5722';
   if (reportCount === 1) return '#FFB300';
   if (spot.feeRequired) return '#9E9E9E';

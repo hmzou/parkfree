@@ -9,7 +9,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
-import { buildGeoJSON } from './spotGeoJSON';
+import { buildGeoJSON, CAR_MARKER_COLOR } from './spotGeoJSON';
 import { MapLegend } from './MapLegend';
 
 mapboxgl.accessToken = (Constants.expoConfig?.extra?.mapboxAccessToken as string) ?? '';
@@ -26,6 +26,8 @@ interface Props {
   reportCounts: Record<string, number>;
   /** Optional marker coordinate for a searched location */
   searchMarker?: Coordinate | null;
+  /** Where the user parked during an active session ("find my car") */
+  carMarker?: Coordinate | null;
   onSpotPress: (spot: ParkingSpot) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
@@ -51,6 +53,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   isCached,
   reportCounts,
   searchMarker,
+  carMarker,
   onSpotPress,
   onMapMoved,
   onLongPress,
@@ -78,8 +81,8 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   const pointOpacity = isCached ? 0.5 : 1.0;
 
   // Keep current data in refs so the load handler can seed sources with it.
-  const dataRef = useRef({ geoJSON, userCoordinate, searchMarker });
-  dataRef.current = { geoJSON, userCoordinate, searchMarker };
+  const dataRef = useRef({ geoJSON, userCoordinate, searchMarker, carMarker });
+  dataRef.current = { geoJSON, userCoordinate, searchMarker, carMarker };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -97,7 +100,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
     let moveDebounce: ReturnType<typeof setTimeout> | null = null;
 
     map.on('load', () => {
-      const { geoJSON: initial, userCoordinate: user, searchMarker: search } = dataRef.current;
+      const { geoJSON: initial, userCoordinate: user, searchMarker: search, carMarker: car } = dataRef.current;
 
       map.addSource('spots-source', {
         type: 'geojson',
@@ -179,6 +182,22 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
         paint: { 'circle-color': '#2196F3', 'circle-radius': 8, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
       });
 
+      // Parked car marker
+      map.addSource('car-marker-source', { type: 'geojson', data: pointCollection(car) });
+      map.addLayer({
+        id: 'car-marker-dot',
+        type: 'circle',
+        source: 'car-marker-source',
+        paint: { 'circle-color': CAR_MARKER_COLOR, 'circle-radius': 12, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+      });
+      map.addLayer({
+        id: 'car-marker-label',
+        type: 'symbol',
+        source: 'car-marker-source',
+        layout: { 'text-field': 'P', 'text-size': 13, 'text-allow-overlap': true },
+        paint: { 'text-color': '#fff' },
+      });
+
       loadedRef.current = true;
     });
 
@@ -244,6 +263,12 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
     if (!map || !loadedRef.current) return;
     (map.getSource('search-marker-source') as mapboxgl.GeoJSONSource | undefined)?.setData(pointCollection(searchMarker));
   }, [searchMarker]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+    (map.getSource('car-marker-source') as mapboxgl.GeoJSONSource | undefined)?.setData(pointCollection(carMarker));
+  }, [carMarker]);
 
   useEffect(() => {
     const map = mapRef.current;

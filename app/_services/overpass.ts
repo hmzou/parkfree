@@ -1,6 +1,13 @@
 import { ParkingSpot, SpotType, City } from '../_types';
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+// Main instance first, then public mirrors (wiki.openstreetmap.org/wiki/Overpass_API).
+// The main instance rate-limits and sometimes refuses connections outright; a single
+// endpoint made spot loading fail entirely whenever it was busy.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+];
 
 // Overpass rejects requests without a descriptive User-Agent (HTTP 406), and the
 // defaults sent by React Native's networking stack don't qualify. Browsers ignore
@@ -132,19 +139,11 @@ out center tags;
 `.trim();
 }
 
-export async function fetchFreeParkingSpots(
-  lat: number,
-  lng: number,
-  radiusMeters = 1000,
-): Promise<ParkingSpot[]> {
-  const query = buildQuery(lat, lng, radiusMeters);
-
+async function postQuery(endpoint: string, query: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  let response: Response;
   try {
-    response = await fetch(OVERPASS_ENDPOINT, {
+    return await fetch(endpoint, {
       method: 'POST',
       signal: controller.signal,
       headers: {
@@ -158,10 +157,30 @@ export async function fetchFreeParkingSpots(
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  if (!response.ok) {
-    throw new Error(`Overpass API error: ${response.status}`);
+export async function fetchFreeParkingSpots(
+  lat: number,
+  lng: number,
+  radiusMeters = 1000,
+): Promise<ParkingSpot[]> {
+  const query = buildQuery(lat, lng, radiusMeters);
+
+  let response: Response | null = null;
+  let lastError: unknown = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      response = await postQuery(endpoint, query);
+      if (response.ok) break;
+      lastError = new Error(`Overpass API error: ${response.status}`);
+      // Only rate limiting / server trouble is worth retrying elsewhere
+      if (response.status !== 429 && response.status < 500) break;
+    } catch (err) {
+      lastError = err;
+    }
+    response = null;
   }
+  if (!response || !response.ok) throw lastError ?? new Error('Overpass API unavailable');
 
   const json = await response.json();
   const elements: OverpassElement[] = json.elements ?? [];

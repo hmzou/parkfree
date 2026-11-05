@@ -15,6 +15,8 @@ export interface ParkingSpot {
   occupied: boolean;
   occupiedSince: Date | null;
   occupiedBy: string | null;
+  /** When someone last left or reported this spot open (crowd "just freed" signal) */
+  freedAt?: Date | null;
   city: City;
   verified?: boolean;
   notes?: string;

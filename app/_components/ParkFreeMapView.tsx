@@ -4,7 +4,7 @@ import MapboxGL from '@rnmapbox/maps';
 import type { MapState, ShapeSource as ShapeSourceType } from '@rnmapbox/maps';
 import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
-import { buildGeoJSON } from './spotGeoJSON';
+import { buildGeoJSON, CAR_MARKER_COLOR } from './spotGeoJSON';
 import { MapLegend } from './MapLegend';
 
 MapboxGL.setAccessToken(
@@ -27,6 +27,8 @@ interface Props {
   reportCounts: Record<string, number>;
   /** Optional marker coordinate for a searched location */
   searchMarker?: Coordinate | null;
+  /** Where the user parked during an active session ("find my car") */
+  carMarker?: Coordinate | null;
   onSpotPress: (spot: ParkingSpot) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
@@ -39,6 +41,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   isCached,
   reportCounts,
   searchMarker,
+  carMarker,
   onSpotPress,
   onMapMoved,
   onLongPress,
@@ -265,6 +268,37 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
                 circleRadius: 8,
                 circleStrokeColor: '#fff',
                 circleStrokeWidth: 2,
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        )}
+        {/* Parked car marker */}
+        {carMarker && (
+          <MapboxGL.ShapeSource
+            id="car-marker-source"
+            shape={{
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: [carMarker.longitude, carMarker.latitude] },
+              properties: {},
+            }}
+          >
+            <MapboxGL.CircleLayer
+              id="car-marker-dot"
+              style={{
+                circleColor: CAR_MARKER_COLOR,
+                circleRadius: 12,
+                circleStrokeColor: '#fff',
+                circleStrokeWidth: 2,
+              }}
+            />
+            <MapboxGL.SymbolLayer
+              id="car-marker-label"
+              style={{
+                textField: 'P',
+                textSize: 13,
+                textColor: '#fff',
+                textFont: ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+                textAllowOverlap: true,
               }}
             />
           </MapboxGL.ShapeSource>

@@ -1,7 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ParkingSpot, Coordinate } from '../_types';
 import { fetchFreeParkingSpots, haversineMeters } from '../_services/overpass';
-import { subscribeToSpots, subscribeToUserSpots, subscribeToRecentReports } from '../_services/firebase';
+import {
+  subscribeToSpots,
+  subscribeToUserSpots,
+  subscribeToRecentReports,
+  subscribeToRecentlyFreed,
+  JUST_FREED_WINDOW_MS,
+} from '../_services/firebase';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = (() => {
@@ -71,6 +77,9 @@ export function useSpots(): UseSpotsResult {
   const [firestoreSpots, setFirestoreSpots] = useState<ParkingSpot[]>([]);
   const [userSpots, setUserSpots] = useState<ParkingSpot[]>([]);
   const [reportCounts, setReportCounts] = useState<Record<string, number>>({});
+  const [freedAt, setFreedAt] = useState<Record<string, Date>>({});
+  // Ticks every minute so "just freed" highlights expire on their own
+  const [now, setNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,9 +94,12 @@ export function useSpots(): UseSpotsResult {
     const occupancy = new Map(firestoreSpots.map(s => [s.id, s]));
     const withOccupancy = (s: ParkingSpot): ParkingSpot => {
       const o = occupancy.get(s.id);
+      const freed = freedAt[s.id];
+      const recentlyFreed = freed && now - freed.getTime() < JUST_FREED_WINDOW_MS ? freed : null;
+      if (!o && !recentlyFreed) return s;
       return o
-        ? { ...s, occupied: o.occupied, occupiedSince: o.occupiedSince, occupiedBy: o.occupiedBy }
-        : s;
+        ? { ...s, occupied: o.occupied, occupiedSince: o.occupiedSince, occupiedBy: o.occupiedBy, freedAt: recentlyFreed }
+        : { ...s, freedAt: recentlyFreed };
     };
 
     const merged = osmSpots.map(withOccupancy);
@@ -97,7 +109,7 @@ export function useSpots(): UseSpotsResult {
     }
 
     return merged;
-  }, [osmSpots, firestoreSpots, userSpots]);
+  }, [osmSpots, firestoreSpots, userSpots, freedAt, now]);
 
   // Subscribe to Firestore occupancy updates + user spots + reports in real time
   useEffect(() => {
@@ -107,11 +119,15 @@ export function useSpots(): UseSpotsResult {
     );
     const unsubUser = subscribeToUserSpots((updated) => setUserSpots(updated));
     const unsubReports = subscribeToRecentReports((counts) => setReportCounts(counts));
+    const unsubFreed = subscribeToRecentlyFreed((freed) => setFreedAt(freed));
+    const tick = setInterval(() => setNow(Date.now()), 60_000);
 
     return () => {
       unsubSpots();
       unsubUser();
       unsubReports();
+      unsubFreed();
+      clearInterval(tick);
     };
   }, []);
 

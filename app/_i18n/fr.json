@@ -24,7 +24,11 @@
     "legendOccupied": "Occupé",
     "showingCached": "Hors ligne — places en cache affichées",
     "locationOff": "Localisation désactivée — centre-ville d’Ottawa affiché",
-    "enableLocation": "Activer"
+    "enableLocation": "Activer",
+    "legendJustFreed": "Vient de se libérer (15 min)",
+    "filterNoLimit": "Sans limite de temps",
+    "filterLots": "Stationnements",
+    "filterHideFull": "Masquer les places pleines"
   },
   "spot": {
     "free": "Stationnement gratuit",
@@ -44,7 +48,12 @@
     "ottawa": "Ottawa",
     "gatineau": "Gatineau",
     "seeOptions": "Voir les options",
-    "tooFar": "À %{meters} m — rapprochez-vous pour vous stationner"
+    "tooFar": "À %{meters} m — rapprochez-vous pour vous stationner",
+    "justFreed": "Libérée il y a %{minutes} min — bonnes chances",
+    "winterTitle": "Stationnement hivernal",
+    "winterMessage": "Des interdictions de stationnement de nuit peuvent être décrétées à %{city} cette saison. Vérifiez avant de laisser votre voiture la nuit.",
+    "checkRules": "Voir les règles de la ville",
+    "signsDisclaimer": "Les règles proviennent d’OpenStreetMap et peuvent être incomplètes — vérifiez toujours la signalisation."
   },
   "actions": {
     "parkHere": "Je me stationne ici",
@@ -68,7 +77,8 @@
     "expired": "Temps de stationnement expiré",
     "expiredMessage": "Votre minuterie de stationnement a expiré à %{spot}.",
     "warningTitle": "Stationnement bientôt expiré",
-    "warningMessage": "Votre stationnement expire dans %{minutes} minutes."
+    "warningMessage": "Votre stationnement expire dans %{minutes} minutes.",
+    "findCar": "Ma voiture"
   },
   "directions": {
     "title": "Obtenir l'itinéraire",
@@ -105,13 +115,15 @@
     "version": "Version",
     "openSource": "Données des contributeurs OpenStreetMap",
     "spotsSubmitted": "Places soumises",
-    "sessionsParked": "Sessions de stationnement"
+    "sessionsParked": "Sessions de stationnement",
+    "contributions": "Signalements envoyés"
   },
   "reports": {
     "reportTaken": "Cette place est occupée",
     "thanks": "Merci pour votre signalement !",
     "oneReported": "1 personne a signalé cette place occupée récemment",
-    "manyReported": "%{count} personnes ont signalé cette place occupée récemment"
+    "manyReported": "%{count} personnes ont signalé cette place occupée récemment",
+    "reportOpen": "Cette place est libre"
   },
   "history": {
     "title": "Historique",

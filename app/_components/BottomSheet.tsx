@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Alert,
+  Linking,
 } from 'react-native';
 import RNBottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
@@ -18,7 +19,7 @@ import { t } from '../_i18n';
 import { nearestFreeSpots, haversineMeters } from '../_services/overpass';
 import { DirectionsModal } from './DirectionsModal';
 import { OccupancyMeter } from './OccupancyMeter';
-import { submitOccupancyReport, ensureAnonymousAuth } from '../_services/firebase';
+import { submitOccupancyReport, reportSpotOpen, ensureAnonymousAuth } from '../_services/firebase';
 import { useLocale } from '../_contexts/LocaleContext';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -43,6 +44,23 @@ function parseMaxstayMinutes(restrictions: string | null): number | null {
   if (mMatch) return parseInt(mMatch[1], 10);
   return null;
 }
+
+/**
+ * Winter overnight parking seasons: Ottawa's ban season runs Nov 15 – Apr 1
+ * (ottawa.ca/winterparking); Gatineau's regime runs Dec 1 – Apr 1. Hours and
+ * triggers change, so we link to the official pages rather than hard-coding them.
+ */
+function isWinterParkingSeason(city: string, date = new Date()): boolean {
+  const m = date.getMonth(); // 0 = Jan
+  const d = date.getDate();
+  if (m <= 2 || m === 11) return true; // Dec – Mar
+  return city !== 'Gatineau' && m === 10 && d >= 15;
+}
+
+const CITY_RULES_URL: Record<string, string> = {
+  Ottawa: 'https://ottawa.ca/winterparking',
+  Gatineau: 'https://www.gatineau.ca/',
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -144,6 +162,18 @@ export const SpotBottomSheet: React.FC<Props> = ({
     }
   }, [timerEnabled, timerHours, timerMins, warnMins, onParkHere]);
 
+  const handleReportOpen = useCallback(async () => {
+    if (!spot || reportedThisSession) return;
+    try {
+      const user = await ensureAnonymousAuth();
+      await reportSpotOpen(spot, user.uid);
+      setReportedThisSession(true);
+      Alert.alert(t('reports.thanks'));
+    } catch {
+      Alert.alert(t('errors.submitFailed'), t('errors.retry'));
+    }
+  }, [spot, reportedThisSession]);
+
   const handleReport = useCallback(async () => {
     if (!spot || reportedThisSession) return;
     try {
@@ -182,6 +212,12 @@ export const SpotBottomSheet: React.FC<Props> = ({
   const canPark = distanceMeters <= 150;
 
   const reportCount = spot ? (reportCounts[spot.id] ?? 0) : 0;
+
+  const freedMinsAgo = spot?.freedAt
+    ? Math.max(0, Math.floor((Date.now() - spot.freedAt.getTime()) / 60_000))
+    : null;
+  const showWinterAdvisory = spot?.type === 'street' && isWinterParkingSeason(spot.city);
+  const cityRulesUrl = spot ? CITY_RULES_URL[spot.city] : undefined;
 
   if (!spot) return null;
 
@@ -251,6 +287,34 @@ export const SpotBottomSheet: React.FC<Props> = ({
                 <View style={styles.warningBanner}>
                   <Ionicons name="warning" size={18} color="#FF6D00" />
                   <Text style={styles.warningText}>{t('spot.seasonalBan')}</Text>
+                </View>
+              )}
+
+              {/* Just freed — someone left or reported it open recently */}
+              {!spot.occupied && freedMinsAgo !== null && (
+                <View style={styles.freedBanner}>
+                  <Ionicons name="sparkles-outline" size={16} color="#00E5FF" />
+                  <Text style={styles.freedBannerText}>
+                    {t('spot.justFreed', { minutes: freedMinsAgo })}
+                  </Text>
+                </View>
+              )}
+
+              {/* Winter overnight parking advisory */}
+              {showWinterAdvisory && (
+                <View style={styles.winterBanner}>
+                  <Ionicons name="snow-outline" size={18} color="#81D4FA" />
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Text style={styles.winterTitle}>{t('spot.winterTitle')}</Text>
+                    <Text style={styles.winterText}>
+                      {t('spot.winterMessage', { city: spot.city === 'Gatineau' ? 'Gatineau' : 'Ottawa' })}
+                    </Text>
+                    {cityRulesUrl && (
+                      <TouchableOpacity onPress={() => void Linking.openURL(cityRulesUrl)} activeOpacity={0.7}>
+                        <Text style={styles.winterLink}>{t('spot.checkRules')} ›</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               )}
 
@@ -426,6 +490,25 @@ export const SpotBottomSheet: React.FC<Props> = ({
                       <Text style={styles.secondaryBtnText}>{t('actions.getDirections')}</Text>
                     </TouchableOpacity>
 
+                    {/* Crowd "it's open" report — corrects stale occupied / full signals */}
+                    {(spot.occupied || reportCount > 0) && (
+                      <TouchableOpacity
+                        style={[styles.reportBtn, reportedThisSession && styles.reportBtnDone]}
+                        onPress={handleReportOpen}
+                        disabled={reportedThisSession}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name={reportedThisSession ? 'checkmark-circle-outline' : 'checkmark-done-outline'}
+                          size={18}
+                          color="#4CAF50"
+                        />
+                        <Text style={[styles.reportBtnText, styles.reportBtnTextDone]}>
+                          {reportedThisSession ? t('reports.thanks') : t('reports.reportOpen')}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
                     {/* Crowd report button */}
                     {!spot.occupied && (
                       <TouchableOpacity
@@ -445,6 +528,8 @@ export const SpotBottomSheet: React.FC<Props> = ({
                       </TouchableOpacity>
                     )}
                   </View>
+
+                  <Text style={styles.disclaimer}>{t('spot.signsDisclaimer')}</Text>
                 </>
               )}
             </>
@@ -524,6 +609,49 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   // ── Banners ───────────────────────────────────────────────────────────────
+  freedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,229,255,0.1)',
+    borderRadius: 10,
+    padding: 10,
+  },
+  freedBannerText: {
+    color: '#00E5FF',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  winterBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(129,212,250,0.08)',
+    borderRadius: 10,
+    padding: 12,
+  },
+  winterTitle: {
+    color: '#81D4FA',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  winterText: {
+    color: '#BBB',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  winterLink: {
+    color: '#81D4FA',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  disclaimer: {
+    color: '#666',
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: 'center',
+  },
   warningBanner: {
     flexDirection: 'row',
     alignItems: 'center',

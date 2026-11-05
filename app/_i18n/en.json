@@ -24,7 +24,11 @@
     "legendOccupied": "Occupied",
     "showingCached": "Offline — showing cached spots",
     "locationOff": "Location off — showing downtown Ottawa",
-    "enableLocation": "Enable"
+    "enableLocation": "Enable",
+    "legendJustFreed": "Just freed (last 15 min)",
+    "filterNoLimit": "No time limit",
+    "filterLots": "Lots & garages",
+    "filterHideFull": "Hide reported full"
   },
   "spot": {
     "free": "Free Parking",
@@ -44,7 +48,12 @@
     "ottawa": "Ottawa",
     "gatineau": "Gatineau",
     "seeOptions": "See options",
-    "tooFar": "%{meters}m away — get closer to park here"
+    "tooFar": "%{meters}m away — get closer to park here",
+    "justFreed": "Freed %{minutes} min ago — good odds",
+    "winterTitle": "Winter parking rules",
+    "winterMessage": "Overnight parking bans can be declared in %{city} this season. Check before leaving your car overnight.",
+    "checkRules": "Check city rules",
+    "signsDisclaimer": "Rules come from OpenStreetMap and may be incomplete — always check posted signs."
   },
   "actions": {
     "parkHere": "I'm Parking Here",
@@ -68,7 +77,8 @@
     "expired": "Parking time expired",
     "expiredMessage": "Your parking timer has expired at %{spot}.",
     "warningTitle": "Parking expiring soon",
-    "warningMessage": "Your parking expires in %{minutes} minutes."
+    "warningMessage": "Your parking expires in %{minutes} minutes.",
+    "findCar": "My car"
   },
   "directions": {
     "title": "Get Directions",
@@ -105,13 +115,15 @@
     "version": "Version",
     "openSource": "Data from OpenStreetMap contributors",
     "spotsSubmitted": "Spots submitted",
-    "sessionsParked": "Sessions parked"
+    "sessionsParked": "Sessions parked",
+    "contributions": "Reports submitted"
   },
   "reports": {
     "reportTaken": "This spot is full",
     "thanks": "Thanks for reporting!",
     "oneReported": "1 person reported this full recently",
-    "manyReported": "%{count} people reported this full recently"
+    "manyReported": "%{count} people reported this full recently",
+    "reportOpen": "This spot is open"
   },
   "history": {
     "title": "History",
