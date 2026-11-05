@@ -36,6 +36,12 @@ const DEFAULT_DATASET_URL =
 const REMOTE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const STORAGE_KEY = `dataset_v${DATASET_VERSION}`;
 const CHECKED_AT_KEY = `dataset_v${DATASET_VERSION}_checked_at`;
+const ETAG_KEY = `dataset_v${DATASET_VERSION}_etag`;
+/**
+ * Android's AsyncStorage cannot read back rows over ~2 MB and web localStorage
+ * caps at ~5 MB, so larger downloads are used for this session only.
+ */
+const MAX_STORED_CHARS = 1_800_000;
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = (() => {
@@ -89,16 +95,26 @@ export async function loadDataset(): Promise<ParkFreeDataset> {
  * the new dataset when it is newer than `current`, otherwise null.
  */
 export async function refreshDataset(current: ParkFreeDataset): Promise<ParkFreeDataset | null> {
+  let etag: string | null = null;
   if (AsyncStorage) {
     const checkedAt = Number(await AsyncStorage.getItem(CHECKED_AT_KEY).catch(() => null));
     if (Number.isFinite(checkedAt) && Date.now() - checkedAt < REMOTE_CHECK_INTERVAL_MS) return null;
+    etag = await AsyncStorage.getItem(ETAG_KEY).catch(() => null);
+    // Record the attempt up front so a failing server isn't retried on every launch
+    await AsyncStorage.setItem(CHECKED_AT_KEY, String(Date.now())).catch(() => null);
   }
-  const response = await fetch(datasetUrl());
+  // Conditional request: an unchanged file costs a 304, not a multi-MB download
+  const response = await fetch(datasetUrl(), etag ? { headers: { 'If-None-Match': etag } } : undefined);
+  if (response.status === 304) return null;
   if (!response.ok) throw new Error(`Dataset download failed: ${response.status}`);
-  const remote = await response.json();
-  await AsyncStorage?.setItem(CHECKED_AT_KEY, String(Date.now())).catch(() => null);
+  const text = await response.text();
+  const remote = JSON.parse(text);
   if (!isValid(remote) || !isNewer(remote, current)) return null;
-  await AsyncStorage?.setItem(STORAGE_KEY, JSON.stringify(remote)).catch(() => null);
+  const newEtag = response.headers.get('ETag');
+  if (text.length <= MAX_STORED_CHARS) {
+    await AsyncStorage?.setItem(STORAGE_KEY, text).catch(() => null);
+    if (newEtag) await AsyncStorage?.setItem(ETAG_KEY, newEtag).catch(() => null);
+  }
   return remote;
 }
 

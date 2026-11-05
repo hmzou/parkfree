@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocale, t } from '../_i18n';
+import { formatWhen } from '../_i18n/time';
+import { ottawaDefaultLeaveBy } from '../_services/parkingRules';
 import { MAP_COLORS, OverlayInfo } from './mapStyle';
 import { ensureAnonymousAuth, submitMapCorrection, StreetColor } from '../_services/firebase';
 
@@ -11,6 +13,11 @@ const CORRECTIONS: { color: StreetColor; key: string; swatch: string }[] = [
   { color: 'noParking', key: 'map.legendStreetNo', swatch: MAP_COLORS.streetNo },
   { color: 'paid', key: 'map.legendStreetPaid', swatch: MAP_COLORS.streetPaid },
 ];
+
+/** SpotAngels-style verdict for an unsigned Ottawa street: when must a car parked now move? */
+function freeUntilLine(now: Date = new Date()): string {
+  return t('overlay.freeNowUntil', { time: formatWhen(ottawaDefaultLeaveBy(now), now) });
+}
 
 function describe(info: OverlayInfo): { title: string; lines: string[]; color: string } {
   const fr = getLocale() === 'fr';
@@ -37,7 +44,7 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
     case 'street':
       return {
         title: t('overlay.streetFree', { road: info.road ?? '' }),
-        lines: [t('overlay.streetFreeDetail')],
+        lines: [freeUntilLine(), t('overlay.streetFreeDetail')],
         color: MAP_COLORS.streetFree,
       };
     case 'noParking':
@@ -49,7 +56,7 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
     case 'permit':
       return {
         title: t('overlay.permit', { area: (fr ? info.areaFr : info.area) ?? info.area ?? '' }),
-        lines: [t('overlay.permitDetail')],
+        lines: [freeUntilLine(), t('overlay.permitDetail')],
         color: MAP_COLORS.streetFree,
       };
     case 'free15':

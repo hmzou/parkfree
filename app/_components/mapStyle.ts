@@ -47,19 +47,20 @@ interface PinStyle {
   stroke: string;
 }
 
+/**
+ * Pins use the same three answers as the street lines: green you can park
+ * (time limits are shown on the card), red you can't, blue you pay. A hollow
+ * green ring means the data can't confirm it — check the signs.
+ */
 export function getPinStyle(spot: ParkingSpot, reportCount: number): PinStyle {
   const solid = (fill: string): PinStyle => ({ fill, stroke: '#fff' });
-  if (spot.occupied) return solid(MAP_COLORS.occupied);
-  if (spot.rule?.level === 'banned') return solid(MAP_COLORS.banned);
-  if (reportCount >= 2) return solid(MAP_COLORS.banned);
-  if (reportCount === 1) return solid(MAP_COLORS.limited);
-  if (spot.feeRequired) return solid(MAP_COLORS.fee);
-  // Hollow pins: the data cannot confirm parking here is free right now
-  if (spot.rule?.level === 'unclear') return { fill: MAP_COLORS.unclearFill, stroke: MAP_COLORS.unclear };
-  if (spot.rule?.level === 'limited') return solid(MAP_COLORS.limited);
-  if (!spot.rule && spot.seasonalBan) return solid(MAP_COLORS.banned);
-  if (!spot.rule && spot.timeRestrictions) return solid(MAP_COLORS.limited);
-  return solid(MAP_COLORS.free);
+  if (spot.occupied) return solid(MAP_COLORS.streetNo);
+  if (spot.rule?.level === 'banned') return solid(MAP_COLORS.streetNo);
+  if (reportCount >= 2) return solid(MAP_COLORS.streetNo);
+  if (spot.feeRequired) return solid(MAP_COLORS.streetPaid);
+  if (!spot.rule && spot.seasonalBan) return solid(MAP_COLORS.streetNo);
+  if (spot.rule?.level === 'unclear') return { fill: MAP_COLORS.unclearFill, stroke: MAP_COLORS.streetFree };
+  return solid(MAP_COLORS.streetFree);
 }
 
 export function buildSpotsGeoJSON(
@@ -148,19 +149,14 @@ export interface LegendItem {
 }
 
 export function legendItems(showOverlays: boolean, showWinterParking: boolean): LegendItem[] {
+  // Lines and pins share the same three colours, so one row covers both
   const items: LegendItem[] = [
-    { color: MAP_COLORS.free, key: 'map.legendFree', shape: 'dot' },
-    { color: MAP_COLORS.limited, key: 'map.legendTimeLimited', shape: 'dot' },
-    { color: MAP_COLORS.unclear, key: 'map.legendUnclear', shape: 'ring' },
-    { color: MAP_COLORS.banned, key: 'map.legendBanned', shape: 'dot' },
-    { color: MAP_COLORS.occupied, key: 'map.legendOccupied', shape: 'dot' },
+    { color: MAP_COLORS.streetFree, key: 'map.legendStreetFree', shape: 'line' },
+    { color: MAP_COLORS.streetNo, key: 'map.legendStreetNo', shape: 'line' },
+    { color: MAP_COLORS.streetPaid, key: 'map.legendStreetPaid', shape: 'line' },
+    { color: MAP_COLORS.streetFree, key: 'map.legendUnclear', shape: 'ring' },
   ];
   if (showOverlays) {
-    items.unshift(
-      { color: MAP_COLORS.streetFree, key: 'map.legendStreetFree', shape: 'line' },
-      { color: MAP_COLORS.streetNo, key: 'map.legendStreetNo', shape: 'line' },
-      { color: MAP_COLORS.streetPaid, key: 'map.legendStreetPaid', shape: 'line' },
-    );
     items.push({ color: MAP_COLORS.cityLot, key: 'map.legendCityLot', shape: 'dot' });
     if (showWinterParking) {
       items.push({ color: MAP_COLORS.banAlternate, key: 'map.legendBanAlternate', shape: 'dot' });

@@ -90,7 +90,8 @@
     "paidHoursVary": "Paid hours vary by zone — check the meter.",
     "wrongColour": "Wrong colour? Tell us",
     "shouldBe": "It should be:",
-    "correctionThanks": "Thanks — we’ll review it and fix the map."
+    "correctionThanks": "Thanks — we’ll review it and fix the map.",
+    "freeNowUntil": "Free now · park until %{time} (unless signs say otherwise)"
   },
   "car": {
     "saved": "Car location saved on this phone",

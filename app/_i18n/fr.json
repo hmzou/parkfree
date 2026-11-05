@@ -90,7 +90,8 @@
     "paidHoursVary": "Les heures payantes varient selon la zone — vérifiez le parcomètre.",
     "wrongColour": "Mauvaise couleur? Dites-le-nous",
     "shouldBe": "Ça devrait être :",
-    "correctionThanks": "Merci — nous allons vérifier et corriger la carte."
+    "correctionThanks": "Merci — nous allons vérifier et corriger la carte.",
+    "freeNowUntil": "Gratuit maintenant · jusqu’à %{time} (sauf indication contraire)"
   },
   "car": {
     "saved": "Emplacement enregistré sur ce téléphone",
