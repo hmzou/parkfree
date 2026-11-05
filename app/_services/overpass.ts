@@ -1,6 +1,22 @@
 import { ParkingSpot, SpotType, City } from '../_types';
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+// Main instance first, then public mirrors (wiki.openstreetmap.org/wiki/Overpass_API).
+// The main instance rate-limits and sometimes refuses connections outright; a single
+// endpoint made spot loading fail entirely whenever it was busy.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+];
+
+// Overpass rejects requests without a descriptive User-Agent (HTTP 406), and the
+// defaults sent by React Native's networking stack don't qualify. Browsers ignore
+// this header and send their own, which is accepted.
+const OVERPASS_USER_AGENT = 'ParkFree/1.0 (https://github.com/hmzou/parkfree)';
+
+// The query's server-side timeout is 25 s; a busy server can still hold the
+// connection open indefinitely, which would leave every later refresh queued.
+const REQUEST_TIMEOUT_MS = 35_000;
 
 // Ottawa + Gatineau bounding boxes
 const OTTAWA_BBOX = '45.2520,-76.3548,45.5376,-75.2467';
@@ -18,10 +34,39 @@ const GATINEAU_LAT_MAX = 45.5505;
 const GATINEAU_LNG_MIN = -76.0356;
 const GATINEAU_LNG_MAX = -75.5835;
 
-function detectCity(lat: number, lng: number): City {
+// The Ottawa River separates the two cities, but the Gatineau bbox overlaps
+// downtown Ottawa, so a bbox check alone labels central Ottawa as Gatineau.
+// Rough south-bank polyline, west → east, as [lng, lat]; north of it is Gatineau.
+const OTTAWA_RIVER: [number, number][] = [
+  [-76.05, 45.47],
+  [-75.95, 45.42],
+  [-75.85, 45.375],
+  [-75.78, 45.385],
+  [-75.73, 45.41],
+  [-75.70, 45.43],
+  [-75.67, 45.445],
+  [-75.60, 45.47],
+  [-75.50, 45.50],
+  [-75.40, 45.54],
+];
+
+function riverLatAt(lng: number): number {
+  if (lng <= OTTAWA_RIVER[0][0]) return OTTAWA_RIVER[0][1];
+  for (let i = 1; i < OTTAWA_RIVER.length; i++) {
+    const [x1, y1] = OTTAWA_RIVER[i];
+    if (lng <= x1) {
+      const [x0, y0] = OTTAWA_RIVER[i - 1];
+      return y0 + ((lng - x0) / (x1 - x0)) * (y1 - y0);
+    }
+  }
+  return OTTAWA_RIVER[OTTAWA_RIVER.length - 1][1];
+}
+
+export function detectCity(lat: number, lng: number): City {
   if (
     lat >= GATINEAU_LAT_MIN && lat <= GATINEAU_LAT_MAX &&
-    lng >= GATINEAU_LNG_MIN && lng <= GATINEAU_LNG_MAX
+    lng >= GATINEAU_LNG_MIN && lng <= GATINEAU_LNG_MAX &&
+    lat > riverLatAt(lng)
   ) {
     return 'Gatineau';
   }
@@ -94,6 +139,26 @@ out center tags;
 `.trim();
 }
 
+async function postQuery(endpoint: string, query: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': OVERPASS_USER_AGENT,
+      },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+  } catch (err) {
+    throw controller.signal.aborted ? new Error('Overpass API timed out') : err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchFreeParkingSpots(
   lat: number,
   lng: number,
@@ -101,15 +166,21 @@ export async function fetchFreeParkingSpots(
 ): Promise<ParkingSpot[]> {
   const query = buildQuery(lat, lng, radiusMeters);
 
-  const response = await fetch(OVERPASS_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Overpass API error: ${response.status}`);
+  let response: Response | null = null;
+  let lastError: unknown = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      response = await postQuery(endpoint, query);
+      if (response.ok) break;
+      lastError = new Error(`Overpass API error: ${response.status}`);
+      // Only rate limiting / server trouble is worth retrying elsewhere
+      if (response.status !== 429 && response.status < 500) break;
+    } catch (err) {
+      lastError = err;
+    }
+    response = null;
   }
+  if (!response || !response.ok) throw lastError ?? new Error('Overpass API unavailable');
 
   const json = await response.json();
   const elements: OverpassElement[] = json.elements ?? [];

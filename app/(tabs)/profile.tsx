@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { t } from '../_i18n';
 import { useSessionContext } from '../_contexts/SessionContext';
+import { getSessionCount, getReportCount } from '../_services/firebase';
 import { useLocale } from '../_contexts/LocaleContext';
+import { JUST_FREED_COLOR } from '../_components/spotGeoJSON';
 
 const APP_VERSION = '1.0.0';
 
@@ -21,6 +23,17 @@ export default function ProfileScreen() {
   const { locale, setLocale } = useLocale();
 
   const shortId = userId ? userId.slice(0, 12) + '…' : '—';
+
+  // Lifetime stats; re-fetched when a session starts or ends
+  const [stats, setStats] = useState<{ sessions: number; reports: number } | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    Promise.all([getSessionCount(userId), getReportCount(userId)])
+      .then(([sessions, reports]) => { if (!cancelled) setStats({ sessions, reports }); })
+      .catch(err => console.warn('Profile stats failed:', err));
+    return () => { cancelled = true; };
+  }, [userId, session?.id]);
 
   return (
     <ScrollView
@@ -48,7 +61,12 @@ export default function ProfileScreen() {
 
         <View style={styles.row}>
           <Text style={styles.rowLabel}>{t('profile.sessionsParked')}</Text>
-          <Text style={styles.rowValue}>{session ? '1' : '0'}</Text>
+          <Text style={styles.rowValue}>{stats ? stats.sessions : '—'}</Text>
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>{t('profile.contributions')}</Text>
+          <Text style={styles.rowValue}>{stats ? stats.reports : '—'}</Text>
         </View>
       </View>
 
@@ -90,6 +108,7 @@ export default function ProfileScreen() {
         </View>
 
         {[
+          { color: JUST_FREED_COLOR, label: t('map.legendJustFreed') },
           { color: '#4CAF50', label: t('map.legendFree') },
           { color: '#FFB300', label: t('map.legendTimeLimited') },
           { color: '#9E9E9E', label: t('map.legendPermit') },

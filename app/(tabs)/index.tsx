@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +18,7 @@ import { TimerBar } from '../_components/TimerBar';
 import { AddSpotModal } from '../_components/AddSpotModal';
 import { LocationSearchBar } from '../_components/LocationSearchBar';
 import { SearchResultCard } from '../_components/SearchResultCard';
+import { DirectionsModal } from '../_components/DirectionsModal';
 
 import { useLocation } from '../_hooks/useLocation';
 import { useSpots } from '../_hooks/useSpots';
@@ -33,7 +35,6 @@ import {
   subscribeToLotOccupancy,
   BusinessParkingRecord,
 } from '../_services/businessParking';
-import { fetchFreeParkingSpots } from '../_services/overpass';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,14 @@ interface SearchState {
   result: GeocodingResult;
   nearestSpot: ParkingSpot | null;
 }
+
+type SpotFilter = 'noLimit' | 'lots' | 'hideFull';
+
+const FILTERS: { key: SpotFilter; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
+  { key: 'noLimit', label: 'map.filterNoLimit', icon: 'infinite-outline' },
+  { key: 'lots', label: 'map.filterLots', icon: 'business-outline' },
+  { key: 'hideFull', label: 'map.filterHideFull', icon: 'eye-off-outline' },
+];
 
 interface BusinessOccupancyState {
   record: BusinessParkingRecord;
@@ -63,6 +72,19 @@ export default function MapScreen() {
   const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
   const [addSpotVisible, setAddSpotVisible] = useState(false);
   const [addSpotCoord, setAddSpotCoord] = useState<Coordinate | null>(null);
+  // One-tap map filters
+  const [filters, setFilters] = useState<Set<SpotFilter>>(new Set());
+  const toggleFilter = useCallback((key: SpotFilter) => {
+    setFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+  const [carDirectionsVisible, setCarDirectionsVisible] = useState(false);
+
+  // Measured screen height (above the tab bar) for the bottom sheet's container
+  const [screenHeight, setScreenHeight] = useState<number | undefined>(undefined);
 
   // "Search this area" pill
   const [searchCoord, setSearchCoord] = useState<Coordinate | null>(null);
@@ -127,12 +149,12 @@ export default function MapScreen() {
         mapRef.current?.flyTo(result.latitude, result.longitude, 15);
         setSearchMarker(searchCoordinate);
 
-        // Fetch fresh spots around the searched location (in parallel with business lookup)
-        const [freshSpots] = await Promise.all([
-          fetchFreeParkingSpots(result.latitude, result.longitude, 1500).catch(() => spots),
-        ]);
+        // Load spots around the searched location onto the map, so the nearest
+        // spot we suggest is one the user can actually tap.
+        const freshSpots = await refresh(searchCoordinate, { force: true });
+        setShowSearchBtn(false);
 
-        const spotsToSearch = freshSpots.length > 0 ? freshSpots : spots;
+        const spotsToSearch = freshSpots && freshSpots.length > 0 ? freshSpots : spots;
 
         // Find the nearest free spot to the searched location
         const nearest = nearestFreeSpots(spotsToSearch, result.latitude, result.longitude, 1);
@@ -171,7 +193,7 @@ export default function MapScreen() {
         setSearchLoading(false);
       }
     },
-    [spots],
+    [spots, refresh],
   );
 
   const handleDismissSearchResult = useCallback(() => {
@@ -255,7 +277,7 @@ export default function MapScreen() {
   const handleSearchThisArea = useCallback(async () => {
     if (!searchCoord) return;
     setShowSearchBtn(false);
-    await refresh(searchCoord);
+    await refresh(searchCoord, { force: true });
   }, [searchCoord, refresh]);
 
   const handleLongPress = useCallback((coord: Coordinate) => {
@@ -263,9 +285,11 @@ export default function MapScreen() {
     setAddSpotVisible(true);
   }, []);
 
-  const handleOpenSettings = useCallback(() => {
-    Linking.openSettings();
-  }, []);
+  // Web can re-prompt; native apps must send the user to Settings once denied.
+  const handleEnableLocation = useCallback(() => {
+    if (Platform.OS === 'web') void requestPermission();
+    else void Linking.openSettings();
+  }, [requestPermission]);
 
   // Build a human-readable spot label for the session bar
   const sessionSpotLabel = session
@@ -278,25 +302,36 @@ export default function MapScreen() {
       } · ${session.spotCity ?? 'Ottawa'}`
     : undefined;
 
+  const visibleSpots = useMemo(
+    () => spots.filter(s =>
+      (!filters.has('noLimit') || (!s.timeRestrictions && !s.seasonalBan)) &&
+      (!filters.has('lots') || s.type !== 'street') &&
+      (!filters.has('hideFull') || (!s.occupied && !(reportCounts[s.id] > 0))),
+    ),
+    [spots, filters, reportCounts],
+  );
+
+  const carCoordinate = useMemo(
+    () => (session ? { latitude: session.lat, longitude: session.lng } : null),
+    [session?.lat, session?.lng],
+  );
+
+  const handleFindCar = useCallback(() => {
+    if (!session) return;
+    mapRef.current?.flyTo(session.lat, session.lng, 16);
+    setCarDirectionsVisible(true);
+  }, [session]);
+
   // Business occupancy for the selected spot's bottom sheet
   const spotBusinessOccupancy =
     businessOccupancy && selectedSpot?.id === businessOccupancy.record.spotId
       ? { activeCount: businessOccupancy.activeCount, capacity: businessOccupancy.record.capacity }
       : null;
 
-  // ── Location denied screen ──────────────────────────────────────────────────
-  if (permissionStatus === 'denied') {
-    return (
-      <View style={styles.centerScreen}>
-        <Ionicons name="location-outline" size={56} color="#00C853" />
-        <Text style={styles.permTitle}>{t('map.locationDenied')}</Text>
-        <Text style={styles.permMsg}>{t('map.locationDeniedMessage')}</Text>
-        <TouchableOpacity style={styles.settingsBtn} onPress={handleOpenSettings}>
-          <Text style={styles.settingsBtnText}>{t('map.openSettings')}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // Without location the map still works, centred on downtown Ottawa; a banner
+  // offers to enable it and pushes the other overlays down.
+  const locationOff = permissionStatus === 'denied';
+  const overlayTop = insets.top + 148 + (locationOff ? 44 : 0);
 
   // ── Loading screen ──────────────────────────────────────────────────────────
   if (locationLoading) {
@@ -309,16 +344,17 @@ export default function MapScreen() {
   }
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={e => setScreenHeight(e.nativeEvent.layout.height)}>
       {/* Map */}
       <ParkFreeMapView
         ref={mapRef}
         userCoordinate={coordinate}
-        spots={spots}
+        spots={visibleSpots}
         selectedSpotId={selectedSpot?.id ?? null}
         isCached={isCached}
         reportCounts={reportCounts}
         searchMarker={searchMarker}
+        carMarker={carCoordinate}
         onSpotPress={handleSpotPress}
         onMapMoved={handleMapMoved}
         onLongPress={handleLongPress}
@@ -348,21 +384,52 @@ export default function MapScreen() {
 
         {/* Search bar */}
         <LocationSearchBar onSelectResult={handleSearchSelect} />
+
+        {/* One-tap filters */}
+        <View style={styles.filterRow}>
+          {FILTERS.map(f => {
+            const active = filters.has(f.key);
+            return (
+              <TouchableOpacity
+                key={f.key}
+                style={[styles.filterChip, active && styles.filterChipActive]}
+                onPress={() => toggleFilter(f.key)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name={f.icon} size={13} color={active ? '#111' : '#CCC'} />
+                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{t(f.label)}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
+
+      {/* Location off banner */}
+      {locationOff && (
+        <TouchableOpacity
+          style={[styles.locationBanner, { top: insets.top + 148 }]}
+          onPress={handleEnableLocation}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="location-outline" size={15} color="#00C853" />
+          <Text style={styles.locationBannerText} numberOfLines={1}>{t('map.locationOff')}</Text>
+          <Text style={styles.locationBannerAction}>{t('map.enableLocation')}</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Offline / cached banner */}
       {isCached && !spotsLoading && (
-        <View style={[styles.offlineBanner, { top: insets.top + 106 }]}>
+        <View style={[styles.offlineBanner, { top: overlayTop }]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#FFB300" />
           <Text style={styles.offlineBannerText}>
-            {t('errors.fetchFailed')} — showing cached spots
+            {t('map.showingCached')}
           </Text>
         </View>
       )}
 
       {/* Empty state */}
-      {!spotsLoading && !spotsError && spots.length === 0 && !isCached && !searchState && (
-        <View style={[styles.emptyBanner, { top: insets.top + 106 }]}>
+      {!spotsLoading && !spotsError && visibleSpots.length === 0 && !isCached && !searchState && (
+        <View style={[styles.emptyBanner, { top: overlayTop }]}>
           <Ionicons name="search-outline" size={14} color="#AAA" />
           <Text style={styles.emptyBannerText}>{t('map.noSpotsFound')}</Text>
         </View>
@@ -371,7 +438,7 @@ export default function MapScreen() {
       {/* "Search this area" pill */}
       {showSearchBtn && !spotsLoading && (
         <TouchableOpacity
-          style={[styles.searchPill, { top: insets.top + 112 }]}
+          style={[styles.searchPill, { top: overlayTop + 6 }]}
           onPress={handleSearchThisArea}
           activeOpacity={0.88}
         >
@@ -380,7 +447,7 @@ export default function MapScreen() {
         </TouchableOpacity>
       )}
       {showSearchBtn && spotsLoading && (
-        <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 112 }]}>
+        <View style={[styles.searchPill, styles.searchPillLoading, { top: overlayTop + 6 }]}>
           <ActivityIndicator size="small" color="#111" />
           <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
         </View>
@@ -388,7 +455,7 @@ export default function MapScreen() {
 
       {/* Search result card */}
       {searchState && !searchLoading && (
-        <View style={[styles.searchResultContainer, { top: insets.top + 114 }]}>
+        <View style={[styles.searchResultContainer, { top: overlayTop + 8 }]}>
           <SearchResultCard
             searchedLat={searchState.result.latitude}
             searchedLng={searchState.result.longitude}
@@ -421,9 +488,17 @@ export default function MapScreen() {
           sessionStartTime={session.startTime}
           spotLabel={sessionSpotLabel}
           onLeave={handleLeave}
+          onFindCar={handleFindCar}
           loading={sessionLoading}
         />
       )}
+
+      {/* Directions back to the parked car */}
+      <DirectionsModal
+        visible={carDirectionsVisible}
+        target={session ? { lat: session.lat, lng: session.lng, label: t('session.findCar') } : null}
+        onClose={() => setCarDirectionsVisible(false)}
+      />
 
       {/* Spot detail bottom sheet */}
       <SpotBottomSheet
@@ -439,6 +514,7 @@ export default function MapScreen() {
         reportCounts={reportCounts}
         businessOccupancy={spotBusinessOccupancy}
         onSelectNearestSpot={handleSelectNearestSpot}
+        containerHeight={screenHeight}
       />
 
       {/* Add spot modal */}
@@ -464,30 +540,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 32,
     gap: 16,
-  },
-  permTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  permMsg: {
-    fontSize: 15,
-    color: '#AAA',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  settingsBtn: {
-    backgroundColor: '#00C853',
-    borderRadius: 14,
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    marginTop: 8,
-  },
-  settingsBtnText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
   },
   loadingText: {
     color: '#AAA',
@@ -535,7 +587,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  // ── Filter chips ────────────────────────────────────────────────────────────
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(26,26,26,0.92)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  filterChipActive: {
+    backgroundColor: '#00C853',
+    borderColor: '#00C853',
+  },
+  filterChipText: {
+    color: '#CCC',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
+    color: '#111',
+  },
   // ── Banners ─────────────────────────────────────────────────────────────────
+  locationBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(26,26,26,0.92)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  locationBannerText: {
+    color: '#CCC',
+    fontSize: 12,
+    flex: 1,
+  },
+  locationBannerAction: {
+    color: '#00C853',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   offlineBanner: {
     position: 'absolute',
     alignSelf: 'center',

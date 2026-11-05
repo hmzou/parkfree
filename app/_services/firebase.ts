@@ -27,6 +27,8 @@ import {
   DocumentData,
   QuerySnapshot,
   limit,
+  increment,
+  getCountFromServer,
 } from 'firebase/firestore';
 import Constants from 'expo-constants';
 import { ParkingSpot, ParkingSession, UserSpotSubmission, SpotType, OccupancyReport } from '../_types';
@@ -117,6 +119,7 @@ function spotFromDoc(id: string, data: DocumentData): ParkingSpot {
       ? data.occupiedSince.toDate()
       : null,
     occupiedBy: data.occupiedBy ?? null,
+    freedAt: data.freedAt instanceof Timestamp ? data.freedAt.toDate() : null,
     city: data.city ?? 'Unknown',
     verified: data.verified ?? false,
     notes: data.notes ?? '',
@@ -124,7 +127,9 @@ function spotFromDoc(id: string, data: DocumentData): ParkingSpot {
 }
 
 /**
- * Subscribe to all verified user-submitted spots and OSM-synced spots in real time.
+ * Subscribe to currently occupied spots in real time. These docs are overlaid on
+ * the OSM / user spots by ID; a spot that frees up drops out of the result set
+ * and falls back to its default (free) state.
  * Returns an unsubscribe function.
  */
 export function subscribeToSpots(
@@ -133,7 +138,7 @@ export function subscribeToSpots(
 ): () => void {
   const q = query(
     collection(db, 'spots'),
-    where('feeRequired', '==', false),
+    where('occupied', '==', true),
   );
 
   return onSnapshot(
@@ -185,22 +190,102 @@ export function subscribeToUserSpots(
 
 // ─── Occupancy ────────────────────────────────────────────────────────────────
 
+/**
+ * setDoc + merge (not updateDoc) so this works for spots that have no Firestore
+ * document yet — e.g. a fresh OSM spot or a user-submitted spot.
+ * `activeSessions` counts parked users; the business occupancy meter reads it.
+ */
 export async function markSpotOccupied(
-  spotId: string,
+  spot: Pick<ParkingSpot, 'id' | 'lat' | 'lng' | 'type' | 'city'>,
   userId: string,
 ): Promise<void> {
-  await updateDoc(doc(db, 'spots', spotId), {
-    occupied: true,
-    occupiedSince: serverTimestamp(),
-    occupiedBy: userId,
-  });
+  await setDoc(
+    doc(db, 'spots', spot.id),
+    {
+      lat: spot.lat,
+      lng: spot.lng,
+      type: spot.type,
+      city: spot.city,
+      feeRequired: false,
+      occupied: true,
+      occupiedSince: serverTimestamp(),
+      occupiedBy: userId,
+      activeSessions: increment(1),
+    },
+    { merge: true },
+  );
 }
 
 export async function markSpotFree(spotId: string): Promise<void> {
-  await updateDoc(doc(db, 'spots', spotId), {
-    occupied: false,
-    occupiedSince: null,
-    occupiedBy: null,
+  await setDoc(
+    doc(db, 'spots', spotId),
+    {
+      occupied: false,
+      occupiedSince: null,
+      occupiedBy: null,
+      activeSessions: increment(-1),
+      freedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+/** How long a freed / reported-open spot is highlighted as "just freed". */
+export const JUST_FREED_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * Subscribe to spots freed (someone left, or reported it open) since
+ * JUST_FREED_WINDOW_MS before subscribing. Callers filter by age as time passes.
+ * Returns an unsubscribe function.
+ */
+export function subscribeToRecentlyFreed(
+  onUpdate: (freed: Record<string, Date>) => void,
+): () => void {
+  const since = new Date(Date.now() - JUST_FREED_WINDOW_MS);
+  const q = query(
+    collection(db, 'spots'),
+    where('freedAt', '>=', Timestamp.fromDate(since)),
+  );
+
+  return onSnapshot(q, (snapshot: QuerySnapshot) => {
+    const freed: Record<string, Date> = {};
+    snapshot.docs.forEach(d => {
+      const at = d.data().freedAt;
+      if (at instanceof Timestamp) freed[d.id] = at.toDate();
+    });
+    onUpdate(freed);
+  }, (err) => console.warn('Freed spots error:', err));
+}
+
+/**
+ * Crowd report: "this spot is open". Clears occupancy, flags the spot as just
+ * freed for everyone, and logs the report so it counts as a contribution.
+ */
+export async function reportSpotOpen(
+  spot: Pick<ParkingSpot, 'id' | 'lat' | 'lng' | 'type' | 'city'>,
+  userId: string,
+): Promise<void> {
+  await setDoc(
+    doc(db, 'spots', spot.id),
+    {
+      lat: spot.lat,
+      lng: spot.lng,
+      type: spot.type,
+      city: spot.city,
+      feeRequired: false,
+      occupied: false,
+      occupiedSince: null,
+      occupiedBy: null,
+      freedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+  const hourKey = new Date().toISOString().slice(0, 13);
+  await setDoc(doc(db, 'occupancyReports', `${userId}_${spot.id}_${hourKey}_open`), {
+    spotId: spot.id,
+    userId,
+    kind: 'open',
+    reportedAt: serverTimestamp(),
   });
 }
 
@@ -311,6 +396,7 @@ export async function submitOccupancyReport(
   await setDoc(doc(db, 'occupancyReports', docId), {
     spotId,
     userId,
+    kind: 'taken',
     reportedAt: serverTimestamp(),
   });
 }
@@ -331,7 +417,9 @@ export function subscribeToRecentReports(
   return onSnapshot(q, (snapshot: QuerySnapshot) => {
     const counts: Record<string, number> = {};
     snapshot.docs.forEach(d => {
-      const spotId = d.data().spotId as string;
+      const data = d.data();
+      if (data.kind === 'open') return; // "open" reports are surfaced via freedAt
+      const spotId = data.spotId as string;
       counts[spotId] = (counts[spotId] ?? 0) + 1;
     });
     onUpdate(counts);
@@ -351,32 +439,20 @@ export async function submitUserSpot(
   return ref.id;
 }
 
-// ─── OSM spot upsert (called from overpass service) ───────────────────────────
+// ─── Profile stats ────────────────────────────────────────────────────────────
 
-/**
- * Write or merge an OSM spot into Firestore using the spot's own OSM ID as the
- * document key (e.g. "osm_node_123456").  This keeps the Firestore document ID
- * in sync with the in-memory ParkingSpot.id so that occupancy lookups and
- * markSpotOccupied() can find the correct document.
- */
-export async function upsertOsmSpot(spot: ParkingSpot): Promise<void> {
-  await setDoc(
-    doc(db, 'spots', spot.id),
-    {
-      source: spot.source,
-      lat: spot.lat,
-      lng: spot.lng,
-      type: spot.type,
-      feeRequired: spot.feeRequired,
-      timeRestrictions: spot.timeRestrictions,
-      seasonalBan: spot.seasonalBan,
-      occupied: spot.occupied,
-      occupiedSince: spot.occupiedSince ? Timestamp.fromDate(spot.occupiedSince) : null,
-      occupiedBy: spot.occupiedBy,
-      city: spot.city,
-      verified: spot.verified ?? true,
-      notes: spot.notes ?? '',
-    },
-    { merge: true },
+/** Number of parking sessions (active or past) this user has started. */
+export async function getSessionCount(userId: string): Promise<number> {
+  const snap = await getCountFromServer(
+    query(collection(db, 'sessions'), where('userId', '==', userId)),
   );
+  return snap.data().count;
+}
+
+/** Number of crowd reports ("full" or "open") this user has submitted. */
+export async function getReportCount(userId: string): Promise<number> {
+  const snap = await getCountFromServer(
+    query(collection(db, 'occupancyReports'), where('userId', '==', userId)),
+  );
+  return snap.data().count;
 }

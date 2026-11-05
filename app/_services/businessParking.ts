@@ -9,8 +9,7 @@
  *   spotId      string   — Firestore spot document ID
  *   capacity    number   — max number of parking spaces (used to compute occupancy %)
  *
- * The occupancy count comes from the `sessions` collection: active sessions
- * whose spotId matches.
+ * The occupancy count comes from the `activeSessions` counter on `spots/{spotId}`.
  */
 
 import {
@@ -19,6 +18,7 @@ import {
   where,
   getDocs,
   onSnapshot,
+  doc,
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -80,20 +80,16 @@ export async function getBusinessParking(
 
 /**
  * Subscribe to the live occupancy count for a given spotId.
- * Counts active parking sessions at that spot.
+ * Reads the `activeSessions` counter on the spot document — sessions themselves
+ * are private to each user, so they can't be counted from the client.
  * Returns an unsubscribe function.
  */
 export function subscribeToLotOccupancy(
   spotId: string,
   onUpdate: (activeCount: number) => void,
 ): () => void {
-  const q = query(
-    collection(db, 'sessions'),
-    where('spotId', '==', spotId),
-    where('active', '==', true),
-  );
-
-  return onSnapshot(q, snapshot => {
-    onUpdate(snapshot.size);
+  return onSnapshot(doc(db, 'spots', spotId), snapshot => {
+    const count = (snapshot.data()?.activeSessions as number | undefined) ?? 0;
+    onUpdate(Math.max(0, count));
   });
 }

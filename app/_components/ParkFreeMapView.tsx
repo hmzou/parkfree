@@ -1,90 +1,17 @@
-import React, { useRef, useCallback, useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
-import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
+import React, { useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { StyleSheet, View } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import type { MapState, ShapeSource as ShapeSourceType } from '@rnmapbox/maps';
 import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
-import { t } from '../_i18n';
-import { Ionicons } from '@expo/vector-icons';
+import { buildGeoJSON, CAR_MARKER_COLOR } from './spotGeoJSON';
+import { MapLegend } from './MapLegend';
 
 MapboxGL.setAccessToken(
   (Constants.expoConfig?.extra?.mapboxAccessToken as string) ?? '',
 );
 
 const ATTRIBUTION_POSITION = { bottom: 8, right: 8 };
-
-// ─── Pin color helpers ─────────────────────────────────────────────────────────
-
-function getPinColor(spot: ParkingSpot, reportCount: number): string {
-  if (spot.occupied) return '#F44336';
-  if (reportCount >= 2) return '#FF5722';
-  if (reportCount === 1) return '#FFB300';
-  if (spot.feeRequired) return '#9E9E9E';
-  if (spot.seasonalBan) return '#FF5722';
-  if (spot.timeRestrictions) return '#FFB300';
-  return '#4CAF50';
-}
-
-// Convert spots array to a GeoJSON FeatureCollection for ShapeSource
-function buildGeoJSON(
-  spots: ParkingSpot[],
-  selectedId: string | null,
-  reportCounts: Record<string, number>,
-): GeoJSON.FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: spots.map(spot => ({
-      type: 'Feature' as const,
-      id: spot.id,
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [spot.lng, spot.lat],
-      },
-      properties: {
-        id: spot.id,
-        pinColor: getPinColor(spot, reportCounts[spot.id] ?? 0),
-        selected: spot.id === selectedId ? 1 : 0,
-      },
-    })),
-  };
-}
-
-// ─── Legend ────────────────────────────────────────────────────────────────────
-
-const LEGEND_ITEMS = [
-  { color: '#4CAF50', key: 'map.legendFree' },
-  { color: '#FFB300', key: 'map.legendTimeLimited' },
-  { color: '#9E9E9E', key: 'map.legendPermit' },
-  { color: '#FF5722', key: 'map.legendOther' },
-  { color: '#F44336', key: 'map.legendOccupied' },
-];
-
-// Not memoized — needs to re-render when locale changes so t() calls update
-const MapLegend: React.FC = () => {
-  const [open, setOpen] = useState(false);
-  return (
-    <View style={styles.legendContainer}>
-      <TouchableOpacity
-        style={styles.legendToggle}
-        onPress={() => setOpen(v => !v)}
-        activeOpacity={0.85}
-      >
-        <Ionicons name={open ? 'close' : 'information-circle-outline'} size={18} color="#fff" />
-        {!open && <Text style={styles.legendToggleText}>{t('map.legend')}</Text>}
-      </TouchableOpacity>
-      {open && (
-        <View style={styles.legendPanel}>
-          {LEGEND_ITEMS.map(item => (
-            <View key={item.color} style={styles.legendRow}>
-              <View style={[styles.legendDot, { backgroundColor: item.color }]} />
-              <Text style={styles.legendLabel}>{t(item.key)}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-};
 
 // ─── ParkFreeMapView ──────────────────────────────────────────────────────────
 
@@ -100,6 +27,8 @@ interface Props {
   reportCounts: Record<string, number>;
   /** Optional marker coordinate for a searched location */
   searchMarker?: Coordinate | null;
+  /** Where the user parked during an active session ("find my car") */
+  carMarker?: Coordinate | null;
   onSpotPress: (spot: ParkingSpot) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
@@ -112,6 +41,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   isCached,
   reportCounts,
   searchMarker,
+  carMarker,
   onSpotPress,
   onMapMoved,
   onLongPress,
@@ -342,6 +272,37 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
             />
           </MapboxGL.ShapeSource>
         )}
+        {/* Parked car marker */}
+        {carMarker && (
+          <MapboxGL.ShapeSource
+            id="car-marker-source"
+            shape={{
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: [carMarker.longitude, carMarker.latitude] },
+              properties: {},
+            }}
+          >
+            <MapboxGL.CircleLayer
+              id="car-marker-dot"
+              style={{
+                circleColor: CAR_MARKER_COLOR,
+                circleRadius: 12,
+                circleStrokeColor: '#fff',
+                circleStrokeWidth: 2,
+              }}
+            />
+            <MapboxGL.SymbolLayer
+              id="car-marker-label"
+              style={{
+                textField: 'P',
+                textSize: 13,
+                textColor: '#fff',
+                textFont: ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+                textAllowOverlap: true,
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        )}
       </MapboxGL.MapView>
 
       {/* Pin color legend */}
@@ -356,56 +317,5 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
-  },
-  legendContainer: {
-    position: 'absolute',
-    bottom: 80,
-    left: 12,
-  },
-  legendToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(26,26,26,0.92)',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  legendToggleText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  legendPanel: {
-    marginTop: 6,
-    backgroundColor: 'rgba(26,26,26,0.95)',
-    borderRadius: 12,
-    padding: 10,
-    gap: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 6,
-    minWidth: 160,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  legendLabel: {
-    color: '#CCC',
-    fontSize: 12,
   },
 });
