@@ -22,7 +22,9 @@
     "legendPermit": "Permis / payant",
     "legendOther": "Autre restriction",
     "legendOccupied": "Occupé",
-    "showingCached": "Hors ligne — places en cache affichées"
+    "showingCached": "Hors ligne — places en cache affichées",
+    "locationOff": "Localisation désactivée — centre-ville d’Ottawa affiché",
+    "enableLocation": "Activer"
   },
   "spot": {
     "free": "Stationnement gratuit",

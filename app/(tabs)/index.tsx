@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -262,9 +263,11 @@ export default function MapScreen() {
     setAddSpotVisible(true);
   }, []);
 
-  const handleOpenSettings = useCallback(() => {
-    Linking.openSettings();
-  }, []);
+  // Web can re-prompt; native apps must send the user to Settings once denied.
+  const handleEnableLocation = useCallback(() => {
+    if (Platform.OS === 'web') void requestPermission();
+    else void Linking.openSettings();
+  }, [requestPermission]);
 
   // Build a human-readable spot label for the session bar
   const sessionSpotLabel = session
@@ -283,19 +286,10 @@ export default function MapScreen() {
       ? { activeCount: businessOccupancy.activeCount, capacity: businessOccupancy.record.capacity }
       : null;
 
-  // ── Location denied screen ──────────────────────────────────────────────────
-  if (permissionStatus === 'denied') {
-    return (
-      <View style={styles.centerScreen}>
-        <Ionicons name="location-outline" size={56} color="#00C853" />
-        <Text style={styles.permTitle}>{t('map.locationDenied')}</Text>
-        <Text style={styles.permMsg}>{t('map.locationDeniedMessage')}</Text>
-        <TouchableOpacity style={styles.settingsBtn} onPress={handleOpenSettings}>
-          <Text style={styles.settingsBtnText}>{t('map.openSettings')}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // Without location the map still works, centred on downtown Ottawa; a banner
+  // offers to enable it and pushes the other overlays down.
+  const locationOff = permissionStatus === 'denied';
+  const overlayTop = insets.top + 106 + (locationOff ? 44 : 0);
 
   // ── Loading screen ──────────────────────────────────────────────────────────
   if (locationLoading) {
@@ -349,9 +343,22 @@ export default function MapScreen() {
         <LocationSearchBar onSelectResult={handleSearchSelect} />
       </View>
 
+      {/* Location off banner */}
+      {locationOff && (
+        <TouchableOpacity
+          style={[styles.locationBanner, { top: insets.top + 106 }]}
+          onPress={handleEnableLocation}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="location-outline" size={15} color="#00C853" />
+          <Text style={styles.locationBannerText} numberOfLines={1}>{t('map.locationOff')}</Text>
+          <Text style={styles.locationBannerAction}>{t('map.enableLocation')}</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Offline / cached banner */}
       {isCached && !spotsLoading && (
-        <View style={[styles.offlineBanner, { top: insets.top + 106 }]}>
+        <View style={[styles.offlineBanner, { top: overlayTop }]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#FFB300" />
           <Text style={styles.offlineBannerText}>
             {t('map.showingCached')}
@@ -361,7 +368,7 @@ export default function MapScreen() {
 
       {/* Empty state */}
       {!spotsLoading && !spotsError && spots.length === 0 && !isCached && !searchState && (
-        <View style={[styles.emptyBanner, { top: insets.top + 106 }]}>
+        <View style={[styles.emptyBanner, { top: overlayTop }]}>
           <Ionicons name="search-outline" size={14} color="#AAA" />
           <Text style={styles.emptyBannerText}>{t('map.noSpotsFound')}</Text>
         </View>
@@ -370,7 +377,7 @@ export default function MapScreen() {
       {/* "Search this area" pill */}
       {showSearchBtn && !spotsLoading && (
         <TouchableOpacity
-          style={[styles.searchPill, { top: insets.top + 112 }]}
+          style={[styles.searchPill, { top: overlayTop + 6 }]}
           onPress={handleSearchThisArea}
           activeOpacity={0.88}
         >
@@ -379,7 +386,7 @@ export default function MapScreen() {
         </TouchableOpacity>
       )}
       {showSearchBtn && spotsLoading && (
-        <View style={[styles.searchPill, styles.searchPillLoading, { top: insets.top + 112 }]}>
+        <View style={[styles.searchPill, styles.searchPillLoading, { top: overlayTop + 6 }]}>
           <ActivityIndicator size="small" color="#111" />
           <Text style={styles.searchPillText}>{t('map.searchThisArea')}</Text>
         </View>
@@ -387,7 +394,7 @@ export default function MapScreen() {
 
       {/* Search result card */}
       {searchState && !searchLoading && (
-        <View style={[styles.searchResultContainer, { top: insets.top + 114 }]}>
+        <View style={[styles.searchResultContainer, { top: overlayTop + 8 }]}>
           <SearchResultCard
             searchedLat={searchState.result.latitude}
             searchedLng={searchState.result.longitude}
@@ -464,30 +471,6 @@ const styles = StyleSheet.create({
     padding: 32,
     gap: 16,
   },
-  permTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  permMsg: {
-    fontSize: 15,
-    color: '#AAA',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  settingsBtn: {
-    backgroundColor: '#00C853',
-    borderRadius: 14,
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    marginTop: 8,
-  },
-  settingsBtnText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
-  },
   loadingText: {
     color: '#AAA',
     fontSize: 15,
@@ -535,6 +518,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   // ── Banners ─────────────────────────────────────────────────────────────────
+  locationBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(26,26,26,0.92)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  locationBannerText: {
+    color: '#CCC',
+    fontSize: 12,
+    flex: 1,
+  },
+  locationBannerAction: {
+    color: '#00C853',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   offlineBanner: {
     position: 'absolute',
     alignSelf: 'center',

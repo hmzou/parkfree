@@ -22,7 +22,9 @@
     "legendPermit": "Permit / fee",
     "legendOther": "Other restriction",
     "legendOccupied": "Occupied",
-    "showingCached": "Offline — showing cached spots"
+    "showingCached": "Offline — showing cached spots",
+    "locationOff": "Location off — showing downtown Ottawa",
+    "enableLocation": "Enable"
   },
   "spot": {
     "free": "Free Parking",
