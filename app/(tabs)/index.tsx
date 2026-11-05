@@ -33,7 +33,6 @@ import {
   subscribeToLotOccupancy,
   BusinessParkingRecord,
 } from '../_services/businessParking';
-import { fetchFreeParkingSpots } from '../_services/overpass';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -127,12 +126,12 @@ export default function MapScreen() {
         mapRef.current?.flyTo(result.latitude, result.longitude, 15);
         setSearchMarker(searchCoordinate);
 
-        // Fetch fresh spots around the searched location (in parallel with business lookup)
-        const [freshSpots] = await Promise.all([
-          fetchFreeParkingSpots(result.latitude, result.longitude, 1500).catch(() => spots),
-        ]);
+        // Load spots around the searched location onto the map, so the nearest
+        // spot we suggest is one the user can actually tap.
+        const freshSpots = await refresh(searchCoordinate, { force: true });
+        setShowSearchBtn(false);
 
-        const spotsToSearch = freshSpots.length > 0 ? freshSpots : spots;
+        const spotsToSearch = freshSpots && freshSpots.length > 0 ? freshSpots : spots;
 
         // Find the nearest free spot to the searched location
         const nearest = nearestFreeSpots(spotsToSearch, result.latitude, result.longitude, 1);
@@ -171,7 +170,7 @@ export default function MapScreen() {
         setSearchLoading(false);
       }
     },
-    [spots],
+    [spots, refresh],
   );
 
   const handleDismissSearchResult = useCallback(() => {
@@ -255,7 +254,7 @@ export default function MapScreen() {
   const handleSearchThisArea = useCallback(async () => {
     if (!searchCoord) return;
     setShowSearchBtn(false);
-    await refresh(searchCoord);
+    await refresh(searchCoord, { force: true });
   }, [searchCoord, refresh]);
 
   const handleLongPress = useCallback((coord: Coordinate) => {
@@ -355,7 +354,7 @@ export default function MapScreen() {
         <View style={[styles.offlineBanner, { top: insets.top + 106 }]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#FFB300" />
           <Text style={styles.offlineBannerText}>
-            {t('errors.fetchFailed')} — showing cached spots
+            {t('map.showingCached')}
           </Text>
         </View>
       )}

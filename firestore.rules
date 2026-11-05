@@ -26,6 +26,14 @@ service cloud.firestore {
       allow update: if false; // admin only via Firebase console
     }
 
+    // Crowd "spot taken" reports — public read, one doc per user/spot/hour
+    match /occupancyReports/{reportId} {
+      allow read: if true;
+      allow create, update: if request.auth != null
+        && request.auth.uid == request.resource.data.userId;
+      allow delete: if false;
+    }
+
     // Business parking records — public read, admin write only
     match /businessParking/{id} {
       allow read: if true;

@@ -2,6 +2,11 @@ import { ParkingSpot, SpotType, City } from '../_types';
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 
+// Overpass rejects requests without a descriptive User-Agent (HTTP 406), and the
+// defaults sent by React Native's networking stack don't qualify. Browsers ignore
+// this header and send their own, which is accepted.
+const OVERPASS_USER_AGENT = 'ParkFree/1.0 (https://github.com/hmzou/parkfree)';
+
 // Ottawa + Gatineau bounding boxes
 const OTTAWA_BBOX = '45.2520,-76.3548,45.5376,-75.2467';
 const GATINEAU_BBOX = '45.3876,-76.0356,45.5505,-75.5835';
@@ -103,7 +108,10 @@ export async function fetchFreeParkingSpots(
 
   const response = await fetch(OVERPASS_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': OVERPASS_USER_AGENT,
+    },
     body: `data=${encodeURIComponent(query)}`,
   });
 

@@ -21,7 +21,8 @@
     "legendTimeLimited": "Durée limitée",
     "legendPermit": "Permis / payant",
     "legendOther": "Autre restriction",
-    "legendOccupied": "Occupé"
+    "legendOccupied": "Occupé",
+    "showingCached": "Hors ligne — places en cache affichées"
   },
   "spot": {
     "free": "Stationnement gratuit",
@@ -39,7 +40,9 @@
     "userSubmitted": "Place communautaire",
     "pendingVerification": "En attente de vérification",
     "ottawa": "Ottawa",
-    "gatineau": "Gatineau"
+    "gatineau": "Gatineau",
+    "seeOptions": "Voir les options",
+    "tooFar": "À %{meters} m — rapprochez-vous pour vous stationner"
   },
   "actions": {
     "parkHere": "Je me stationne ici",

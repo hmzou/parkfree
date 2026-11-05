@@ -129,8 +129,9 @@ export const SpotBottomSheet: React.FC<Props> = ({
   const handleParkHere = useCallback(async () => {
     setParking(true);
     try {
+      // Empty / non-numeric inputs count as 0 instead of producing NaN
       const totalMins = timerEnabled
-        ? parseInt(timerHours, 10) * 60 + parseInt(timerMins, 10)
+        ? (parseInt(timerHours, 10) || 0) * 60 + (parseInt(timerMins, 10) || 0)
         : undefined;
       const warn = parseInt(warnMins, 10) || 10;
       await onParkHere(totalMins, warn);
@@ -317,7 +318,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
               {/* ── Actions ─────────────────────────────────────────── */}
               {!expanded && (
                 <TouchableOpacity style={styles.seeOptionsBtn} onPress={onExpand} activeOpacity={0.75}>
-                  <Text style={styles.seeOptionsBtnText}>See options</Text>
+                  <Text style={styles.seeOptionsBtnText}>{t('spot.seeOptions')}</Text>
                   <Ionicons name="chevron-down" size={16} color="#00C853" />
                 </TouchableOpacity>
               )}
@@ -404,7 +405,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
                         <View style={styles.tooFarRow}>
                           <Ionicons name="location-outline" size={16} color="#666" />
                           <Text style={styles.tooFarText}>
-                            {Math.round(distanceMeters)}m away — get closer to park here
+                            {t('spot.tooFar', { meters: Math.round(distanceMeters) })}
                           </Text>
                         </View>
                       )

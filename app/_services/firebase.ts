@@ -27,6 +27,7 @@ import {
   DocumentData,
   QuerySnapshot,
   limit,
+  increment,
 } from 'firebase/firestore';
 import Constants from 'expo-constants';
 import { ParkingSpot, ParkingSession, UserSpotSubmission, SpotType, OccupancyReport } from '../_types';
@@ -124,7 +125,9 @@ function spotFromDoc(id: string, data: DocumentData): ParkingSpot {
 }
 
 /**
- * Subscribe to all verified user-submitted spots and OSM-synced spots in real time.
+ * Subscribe to currently occupied spots in real time. These docs are overlaid on
+ * the OSM / user spots by ID; a spot that frees up drops out of the result set
+ * and falls back to its default (free) state.
  * Returns an unsubscribe function.
  */
 export function subscribeToSpots(
@@ -133,7 +136,7 @@ export function subscribeToSpots(
 ): () => void {
   const q = query(
     collection(db, 'spots'),
-    where('feeRequired', '==', false),
+    where('occupied', '==', true),
   );
 
   return onSnapshot(
@@ -185,23 +188,43 @@ export function subscribeToUserSpots(
 
 // ─── Occupancy ────────────────────────────────────────────────────────────────
 
+/**
+ * setDoc + merge (not updateDoc) so this works for spots that have no Firestore
+ * document yet — e.g. a fresh OSM spot or a user-submitted spot.
+ * `activeSessions` counts parked users; the business occupancy meter reads it.
+ */
 export async function markSpotOccupied(
-  spotId: string,
+  spot: Pick<ParkingSpot, 'id' | 'lat' | 'lng' | 'type' | 'city'>,
   userId: string,
 ): Promise<void> {
-  await updateDoc(doc(db, 'spots', spotId), {
-    occupied: true,
-    occupiedSince: serverTimestamp(),
-    occupiedBy: userId,
-  });
+  await setDoc(
+    doc(db, 'spots', spot.id),
+    {
+      lat: spot.lat,
+      lng: spot.lng,
+      type: spot.type,
+      city: spot.city,
+      feeRequired: false,
+      occupied: true,
+      occupiedSince: serverTimestamp(),
+      occupiedBy: userId,
+      activeSessions: increment(1),
+    },
+    { merge: true },
+  );
 }
 
 export async function markSpotFree(spotId: string): Promise<void> {
-  await updateDoc(doc(db, 'spots', spotId), {
-    occupied: false,
-    occupiedSince: null,
-    occupiedBy: null,
-  });
+  await setDoc(
+    doc(db, 'spots', spotId),
+    {
+      occupied: false,
+      occupiedSince: null,
+      occupiedBy: null,
+      activeSessions: increment(-1),
+    },
+    { merge: true },
+  );
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
@@ -349,34 +372,4 @@ export async function submitUserSpot(
     verified: false,
   });
   return ref.id;
-}
-
-// ─── OSM spot upsert (called from overpass service) ───────────────────────────
-
-/**
- * Write or merge an OSM spot into Firestore using the spot's own OSM ID as the
- * document key (e.g. "osm_node_123456").  This keeps the Firestore document ID
- * in sync with the in-memory ParkingSpot.id so that occupancy lookups and
- * markSpotOccupied() can find the correct document.
- */
-export async function upsertOsmSpot(spot: ParkingSpot): Promise<void> {
-  await setDoc(
-    doc(db, 'spots', spot.id),
-    {
-      source: spot.source,
-      lat: spot.lat,
-      lng: spot.lng,
-      type: spot.type,
-      feeRequired: spot.feeRequired,
-      timeRestrictions: spot.timeRestrictions,
-      seasonalBan: spot.seasonalBan,
-      occupied: spot.occupied,
-      occupiedSince: spot.occupiedSince ? Timestamp.fromDate(spot.occupiedSince) : null,
-      occupiedBy: spot.occupiedBy,
-      city: spot.city,
-      verified: spot.verified ?? true,
-      notes: spot.notes ?? '',
-    },
-    { merge: true },
-  );
 }
