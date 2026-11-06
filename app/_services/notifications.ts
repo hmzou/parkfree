@@ -81,6 +81,7 @@ export async function scheduleExpiryNotification(
  * Cancel all pending notifications for a session (pass the IDs returned above).
  */
 export async function cancelSessionNotifications(ids: string[]): Promise<void> {
+  if (Platform.OS === 'web') return;
   await Promise.all(ids.map(id => Notifications.cancelScheduledNotificationAsync(id)));
 }
 
@@ -114,6 +115,8 @@ export async function scheduleStillParkedReminder(
  * Cancel ALL scheduled notifications (call on "I'm Leaving").
  */
 export async function cancelAllNotifications(): Promise<void> {
+  // Scheduling is unavailable on web and throws there
+  if (Platform.OS === 'web') return;
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
 

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { getLocale, t } from '../_i18n';
 import { formatWhen } from '../_i18n/time';
 import { ottawaDefaultLeaveBy } from '../_services/parkingRules';
+import { prettyRoad } from '../_services/nearestStreet';
 import { MAP_COLORS, OverlayInfo } from './mapStyle';
 import { ensureAnonymousAuth, submitMapCorrection, StreetColor } from '../_services/firebase';
 
@@ -31,7 +32,9 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
         lines.push(t('overlay.paidNotToday'));
       }
       if (info.road) {
-        lines.push(t('overlay.paidDetail', { road: info.road, from: info.from ?? '?', to: info.to ?? '?' }));
+        lines.push(t('overlay.paidDetail', {
+          road: prettyRoad(info.road) ?? '', from: prettyRoad(info.from) ?? '?', to: prettyRoad(info.to) ?? '?',
+        }));
       }
       const facts: string[] = [];
       if (info.hourlyRate) facts.push(t('overlay.paidRate', { rate: Number(info.hourlyRate).toFixed(2) }));
@@ -43,13 +46,13 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
     }
     case 'street':
       return {
-        title: t('overlay.streetFree', { road: info.road ?? '' }),
+        title: t('overlay.streetFree', { road: prettyRoad(info.road) ?? '' }),
         lines: [freeUntilLine(), t('overlay.streetFreeDetail')],
         color: MAP_COLORS.streetFree,
       };
     case 'noParking':
       return {
-        title: t('overlay.streetNo', { road: info.road ?? '' }),
+        title: t('overlay.streetNo', { road: prettyRoad(info.road) ?? '' }),
         lines: [t('overlay.streetNoDetail')],
         color: MAP_COLORS.streetNo,
       };
@@ -88,11 +91,31 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
 interface Props {
   info: OverlayInfo;
   onDismiss: () => void;
+  /** Start a parking session on this street with a reminder before the limit */
+  onParkHere?: (timerMinutes: number) => void;
+}
+
+/** How long a car parked now may stay on this kind of street, in minutes. */
+export function streetStayMinutes(info: OverlayInfo, now: Date = new Date()): number | null {
+  switch (info.kind) {
+    case 'street':
+    case 'permit':
+      return Math.max(1, Math.round((ottawaDefaultLeaveBy(now).getTime() - now.getTime()) / 60_000));
+    case 'free15':
+      return 15;
+    case 'paid': {
+      const hours = parseInt(String(info.maxStayHours ?? ''), 10);
+      return Number.isFinite(hours) && hours > 0 ? hours * 60 : null;
+    }
+    default:
+      return null;
+  }
 }
 
 /** What a tapped city-layer line, area or lot means. */
-export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss }) => {
+export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss, onParkHere }) => {
   const { title, lines, color } = describe(info);
+  const stayMinutes = onParkHere ? streetStayMinutes(info) : null;
   const [correcting, setCorrecting] = useState(false);
   const [sent, setSent] = useState<'idle' | 'sending' | 'done' | 'failed'>('idle');
   const canCorrect = STREET_KINDS.has(info.kind) && typeof info.tapLat === 'number';
@@ -125,6 +148,21 @@ export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss }) => {
         </TouchableOpacity>
       </View>
       {lines.map(line => <Text key={line} style={styles.line}>{line}</Text>)}
+
+      {stayMinutes !== null && onParkHere && (
+        <TouchableOpacity
+          style={[styles.parkBtn, { backgroundColor: color }]}
+          onPress={() => onParkHere(stayMinutes)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="car" size={18} color="#111" />
+          <Text style={styles.parkBtnText}>
+            {t('overlay.parkedHere', {
+              time: formatWhen(new Date(Date.now() + stayMinutes * 60_000)),
+            })}
+          </Text>
+        </TouchableOpacity>
+      )}
       <Text style={styles.source}>{t('overlay.source')}</Text>
 
       {canCorrect && sent === 'done' && (
@@ -189,6 +227,20 @@ const styles = StyleSheet.create({
     color: '#777',
     fontSize: 11,
     marginTop: 4,
+  },
+  parkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  parkBtnText: {
+    color: '#111',
+    fontWeight: '700',
+    fontSize: 15,
   },
   correctLink: {
     color: '#00C853',

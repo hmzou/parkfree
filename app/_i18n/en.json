@@ -36,7 +36,12 @@
     "legendStreetNo": "No parking",
     "legendStreetPaid": "Paid parking",
     "locationOff": "Location off — showing downtown Ottawa",
-    "enableLocation": "Enable"
+    "enableLocation": "Enable",
+    "noFix": "Can't find your location — showing downtown Ottawa. Check that Location is on.",
+    "noFixWeb": "Can't find your location — showing downtown Ottawa. Turn on Location Services for this browser in your computer's settings.",
+    "locateMe": "Show my location",
+    "nearestFree": "Free parking on %{road}",
+    "nearestFreeSub": "%{distance} away · free until %{time}"
   },
   "rules": {
     "okUntil": "OK until %{time}",
@@ -91,7 +96,8 @@
     "wrongColour": "Wrong colour? Tell us",
     "shouldBe": "It should be:",
     "correctionThanks": "Thanks — we’ll review it and fix the map.",
-    "freeNowUntil": "Free now · park until %{time} (unless signs say otherwise)"
+    "freeNowUntil": "Free now · park until %{time} (unless signs say otherwise)",
+    "parkedHere": "I parked here · remind me before %{time}"
   },
   "car": {
     "saved": "Car location saved on this phone",
@@ -139,7 +145,8 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "close": "Close",
-    "submit": "Submit"
+    "submit": "Submit",
+    "needLocation": "Turn on location to park here"
   },
   "session": {
     "parkedAt": "Parked at",
@@ -155,7 +162,8 @@
     "expired": "Parking time expired",
     "expiredMessage": "Your parking timer has expired at %{spot}.",
     "warningTitle": "Parking expiring soon",
-    "warningMessage": "Your parking expires in %{minutes} minutes."
+    "warningMessage": "Your parking expires in %{minutes} minutes.",
+    "timeLeftLong": "%{duration} left"
   },
   "directions": {
     "title": "Get Directions",

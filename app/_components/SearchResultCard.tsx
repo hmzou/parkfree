@@ -11,6 +11,9 @@ import { useLocale } from '../_contexts/LocaleContext';
 import { t } from '../_i18n';
 import { ParkingSpot } from '../_types';
 import { haversineMeters } from '../_services/overpass';
+import type { NearestStreet } from '../_services/nearestStreet';
+import { formatWhen } from '../_i18n/time';
+import { ottawaDefaultLeaveBy } from '../_services/parkingRules';
 
 interface Props {
   /** The geocoded location the user searched for */
@@ -19,8 +22,15 @@ interface Props {
   searchedName: string;
   /** The nearest free spot relative to the searched location */
   nearestSpot: ParkingSpot | null;
+  /** Nearest free street line; preferred over a lot pin when it is closer */
+  nearestStreet?: NearestStreet | null;
   onDismiss: () => void;
   onSelectSpot?: (spot: ParkingSpot) => void;
+  onSelectStreet?: (street: NearestStreet) => void;
+}
+
+function distLabelFor(m: number): string {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.max(10, Math.round(m / 10) * 10)} m`;
 }
 
 export const SearchResultCard: React.FC<Props> = ({
@@ -28,34 +38,50 @@ export const SearchResultCard: React.FC<Props> = ({
   searchedLng,
   searchedName,
   nearestSpot,
+  nearestStreet = null,
   onDismiss,
   onSelectSpot,
+  onSelectStreet,
 }) => {
   useLocale();
 
+  const spotDist = nearestSpot
+    ? haversineMeters(searchedLat, searchedLng, nearestSpot.lat, nearestSpot.lng)
+    : Infinity;
+  const useStreet = !!nearestStreet && nearestStreet.distanceMeters <= spotDist;
+  const target = useStreet
+    ? { lat: nearestStreet!.lat, lng: nearestStreet!.lng }
+    : nearestSpot ? { lat: nearestSpot.lat, lng: nearestSpot.lng } : null;
+
   const openGoogleMaps = useCallback(() => {
-    if (!nearestSpot) return;
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${nearestSpot.lat},${nearestSpot.lng}&travelmode=driving`;
+    if (!target) return;
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}&travelmode=driving`;
     Linking.openURL(url);
-  }, [nearestSpot]);
+  }, [target?.lat, target?.lng]);
 
-  if (!nearestSpot) return null;
+  if (!target) return null;
 
-  const distMeters = Math.round(
-    haversineMeters(searchedLat, searchedLng, nearestSpot.lat, nearestSpot.lng),
-  );
+  const distMeters = Math.round(useStreet ? nearestStreet!.distanceMeters : spotDist);
 
-  const distLabel =
-    distMeters >= 1000
-      ? `${(distMeters / 1000).toFixed(1)} km`
-      : `${distMeters}m`;
+  const distLabel = distLabelFor(distMeters);
 
-  const spotTypeLabel =
-    nearestSpot.type === 'garage'
+  const spotTypeLabel = useStreet
+    ? t('map.nearestFree', { road: nearestStreet!.road ?? t('spot.street') })
+    : nearestSpot!.type === 'garage'
       ? t('spot.garage')
-      : nearestSpot.type === 'lot'
+      : nearestSpot!.type === 'lot'
       ? t('spot.lot')
       : t('spot.street');
+  const subLabel = useStreet
+    ? t('map.nearestFreeSub', {
+        distance: distLabelFor(distMeters),
+        time: formatWhen(
+          nearestStreet!.kind === 'free15'
+            ? new Date(Date.now() + 15 * 60_000)
+            : ottawaDefaultLeaveBy(new Date()),
+        ),
+      })
+    : null;
 
   return (
     <View style={styles.card}>
@@ -80,10 +106,10 @@ export const SearchResultCard: React.FC<Props> = ({
         <View style={styles.greenDot} />
         <View style={styles.resultText}>
           <Text style={styles.resultTitle}>
-            {t('search.closestFreeParking')}
+            {useStreet ? spotTypeLabel : t('search.closestFreeParking')}
           </Text>
           <Text style={styles.resultSub}>
-            {spotTypeLabel} · {distLabel} {t('search.away')}
+            {subLabel ?? `${spotTypeLabel} · ${distLabel} ${t('search.away')}`}
           </Text>
         </View>
         <Text style={styles.distBadge}>{distLabel}</Text>
@@ -91,10 +117,10 @@ export const SearchResultCard: React.FC<Props> = ({
 
       {/* Actions */}
       <View style={styles.actions}>
-        {onSelectSpot && (
+        {(useStreet ? onSelectStreet : onSelectSpot) && (
           <TouchableOpacity
             style={styles.viewBtn}
-            onPress={() => onSelectSpot(nearestSpot)}
+            onPress={() => (useStreet ? onSelectStreet!(nearestStreet!) : onSelectSpot!(nearestSpot!))}
             activeOpacity={0.8}
           >
             <Ionicons name="eye-outline" size={16} color="#00C853" />

@@ -32,7 +32,9 @@ export interface ParkFreeMapViewHandle {
 }
 
 interface Props {
-  userCoordinate: Coordinate;
+  /** Null until a real fix arrives (the native puck draws itself) */
+  userCoordinate: Coordinate | null;
+  userAccuracyMeters?: number | null;
   spots: ParkingSpot[];
   selectedSpotId: string | null;
   isCached: boolean;
@@ -51,6 +53,8 @@ interface Props {
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
 }
+
+const DEFAULT_CENTER: Coordinate = { latitude: 45.4215, longitude: -75.6972 };
 
 export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   userCoordinate,
@@ -86,7 +90,10 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
 
   const cameraDefaultSettings = useMemo(
     () => ({
-      centerCoordinate: [userCoordinate.longitude, userCoordinate.latitude] as [number, number],
+      centerCoordinate: [
+        (userCoordinate ?? DEFAULT_CENTER).longitude,
+        (userCoordinate ?? DEFAULT_CENTER).latitude,
+      ] as [number, number],
       zoomLevel: 14,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -205,7 +212,8 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
         <MapboxGL.Camera ref={cameraRef} defaultSettings={cameraDefaultSettings} />
 
         {/* User location dot */}
-        <MapboxGL.UserLocation visible />
+        {/* Native puck: accuracy ring and heading come from the OS */}
+        <MapboxGL.UserLocation visible renderMode={MapboxGL.UserLocationRenderMode.Native} showsUserHeadingIndicator />
 
         {/* City parking rules, drawn under the spot pins */}
         {showOverlays && (
