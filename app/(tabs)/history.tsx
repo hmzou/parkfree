@@ -51,15 +51,19 @@ export default function HistoryScreen() {
   const [sessions, setSessions] = useState<ParkingSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const loadHistory = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
+    setFailed(false);
     try {
       const history = await getSessionHistory(userId);
       setSessions(history);
     } catch (err) {
       console.warn('History load error:', err);
+      setSessions([]);
+      setFailed(true);
     } finally {
       setLoading(false);
       setLoaded(true);
@@ -94,7 +98,13 @@ export default function HistoryScreen() {
         </View>
       )}
 
-      {!loading && loaded && sessions.length === 0 && (
+      {!loading && failed && (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>{t('history.unavailable')}</Text>
+        </View>
+      )}
+
+      {!loading && loaded && !failed && sessions.length === 0 && (
         <View style={styles.empty}>
           <Text style={styles.emptyEmoji}>🅿️</Text>
           <Text style={styles.emptyText}>{t('history.empty')}</Text>

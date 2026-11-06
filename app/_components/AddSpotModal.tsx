@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SpotType, Coordinate } from '../_types';
 import { t } from '../_i18n';
 import { submitUserSpot, ensureAnonymousAuth } from '../_services/firebase';
+import { detectCity } from '../_services/overpass';
 
 interface Props {
   visible: boolean;
@@ -53,6 +54,7 @@ export const AddSpotModal: React.FC<Props> = ({
         type: selectedType,
         notes,
         timeRestrictions: restrictions || null,
+        city: detectCity(coordinate.latitude, coordinate.longitude),
       });
 
       Alert.alert(t('addSpot.submitted'), t('addSpot.submittedMessage'));

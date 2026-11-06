@@ -1,18 +1,32 @@
-/**
- * Web implementation of ParkFreeMapView using Mapbox GL JS.
- * @rnmapbox/maps is native-only; Metro picks this file for web builds.
- * Same props and handle as the native component, so the map screen is shared.
- */
-import React, { useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { StyleSheet, View } from 'react-native';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
+import { StyleSheet, View, Text } from 'react-native';
 import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
-import { buildGeoJSON, CAR_MARKER_COLOR } from './spotGeoJSON';
+import type { CityLot } from '../_services/cityLots';
 import { MapLegend } from './MapLegend';
+import {
+  buildOverlayGeoJSON,
+  buildSpotsGeoJSON,
+  LINE_OPACITY,
+  LINE_WIDTH,
+  LINE_SORT_KEY,
+  LINE_OFFSET,
+  OVERLAY_MIN_ZOOM,
+  OverlayInfo,
+} from './mapStyle';
 
-mapboxgl.accessToken = (Constants.expoConfig?.extra?.mapboxAccessToken as string) ?? '';
+const MAPBOX_JS = 'https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.js';
+const MAPBOX_CSS = 'https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.css';
+
+const OVERLAY_LAYERS = ['overlay-fill', 'overlay-line', 'overlay-lot', 'overlay-lot-label'];
+const TAP_TOLERANCE_PX = 10;
 
 export interface ParkFreeMapViewHandle {
   flyTo: (latitude: number, longitude: number, zoomLevel?: number) => void;
@@ -24,26 +38,56 @@ interface Props {
   selectedSpotId: string | null;
   isCached: boolean;
   reportCounts: Record<string, number>;
-  /** Optional marker coordinate for a searched location */
   searchMarker?: Coordinate | null;
-  /** Where the user parked during an active session ("find my car") */
-  carMarker?: Coordinate | null;
+  parkedCar?: Coordinate | null;
+  overlays: GeoJSON.FeatureCollection;
+  cityLots: CityLot[];
+  showWinterParking: boolean;
   onSpotPress: (spot: ParkingSpot) => void;
+  onOverlayPress: (info: OverlayInfo) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
 }
 
-function pointCollection(coord: Coordinate | null | undefined): GeoJSON.FeatureCollection {
+function pointCollection(coord: Coordinate | null) {
   return {
-    type: 'FeatureCollection',
+    type: 'FeatureCollection' as const,
     features: coord
       ? [{
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [coord.longitude, coord.latitude] },
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [coord.longitude, coord.latitude] },
           properties: {},
         }]
       : [],
   };
+}
+
+let mapboxPromise: Promise<any> | null = null;
+
+function loadMapbox(): Promise<any> {
+  if (mapboxPromise) return mapboxPromise;
+  mapboxPromise = new Promise((resolve, reject) => {
+    if (typeof document === 'undefined') {
+      reject(new Error('Mapbox GL needs a browser'));
+      return;
+    }
+    const win = window as Window & { mapboxgl?: any };
+    if (win.mapboxgl) {
+      resolve(win.mapboxgl);
+      return;
+    }
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = MAPBOX_CSS;
+    document.head.appendChild(link);
+    const script = document.createElement('script');
+    script.src = MAPBOX_JS;
+    script.async = true;
+    script.onload = () => resolve(win.mapboxgl);
+    script.onerror = () => reject(new Error('Mapbox GL failed to load'));
+    document.head.appendChild(script);
+  });
+  return mapboxPromise;
 }
 
 export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
@@ -53,243 +97,382 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   isCached,
   reportCounts,
   searchMarker,
-  carMarker,
+  parkedCar,
+  overlays,
+  cityLots,
+  showWinterParking,
   onSpotPress,
+  onOverlayPress,
   onMapMoved,
   onLongPress,
 }, ref) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const loadedRef = useRef(false);
+  const containerRef = useRef<View>(null);
+  const mapRef = useRef<any>(null);
+  const spotsRef = useRef(spots);
+  const skipMoveRef = useRef(true);
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [showOverlays, setShowOverlays] = useState(true);
 
-  // Map event handlers are bound once; read the latest props through refs.
-  const latest = useRef({ spots, onSpotPress, onMapMoved, onLongPress });
-  latest.current = { spots, onSpotPress, onMapMoved, onLongPress };
+  spotsRef.current = spots;
+
+  const onSpotPressRef = useRef(onSpotPress);
+  const onOverlayPressRef = useRef(onOverlayPress);
+  const onMapMovedRef = useRef(onMapMoved);
+  const onLongPressRef = useRef(onLongPress);
+  onSpotPressRef.current = onSpotPress;
+  onOverlayPressRef.current = onOverlayPress;
+  onMapMovedRef.current = onMapMoved;
+  onLongPressRef.current = onLongPress;
 
   useImperativeHandle(ref, () => ({
     flyTo: (latitude: number, longitude: number, zoomLevel = 15) => {
-      mapRef.current?.flyTo({ center: [longitude, latitude], zoom: zoomLevel, duration: 800 });
+      skipMoveRef.current = true;
+      mapRef.current?.flyTo({
+        center: [longitude, latitude],
+        zoom: zoomLevel,
+        essential: true,
+      });
     },
   }));
 
-  const geoJSON = useMemo(
-    () => buildGeoJSON(spots, selectedSpotId, reportCounts),
-    [spots, selectedSpotId, reportCounts],
-  );
-
-  // Point opacity: 0.5 for cached, 1.0 for fresh
-  const pointOpacity = isCached ? 0.5 : 1.0;
-
-  // Keep current data in refs so the load handler can seed sources with it.
-  const dataRef = useRef({ geoJSON, userCoordinate, searchMarker, carMarker });
-  dataRef.current = { geoJSON, userCoordinate, searchMarker, carMarker };
-
   useEffect(() => {
-    if (!containerRef.current) return;
+    let cancelled = false;
+    const token = (Constants.expoConfig?.extra?.mapboxAccessToken as string) ?? '';
+    const node = containerRef.current as unknown as HTMLElement | null;
+    if (!node) return;
 
-    const map = new mapboxgl.Map({
-      container: containerRef.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
-      center: [userCoordinate.longitude, userCoordinate.latitude],
-      zoom: 14,
-      attributionControl: true,
-    });
-    mapRef.current = map;
-    map.addControl(new mapboxgl.NavigationControl({ showZoom: true, showCompass: true }), 'top-right');
-
-    let moveDebounce: ReturnType<typeof setTimeout> | null = null;
-
-    map.on('load', () => {
-      const { geoJSON: initial, userCoordinate: user, searchMarker: search, carMarker: car } = dataRef.current;
-
-      map.addSource('spots-source', {
-        type: 'geojson',
-        data: initial,
-        cluster: true,
-        clusterMaxZoom: 15,
-        clusterRadius: 40,
-      });
-
-      map.addLayer({
-        id: 'cluster-circle',
-        type: 'circle',
-        source: 'spots-source',
-        filter: ['has', 'point_count'],
-        paint: {
-          'circle-color': ['interpolate', ['linear'], ['get', 'point_count'], 1, '#4CAF50', 6, '#FFB300', 16, '#FF5722'],
-          'circle-radius': ['interpolate', ['linear'], ['get', 'point_count'], 1, 18, 20, 28],
-          'circle-stroke-color': '#fff',
-          'circle-stroke-width': 2,
-        },
-      });
-      map.addLayer({
-        id: 'cluster-count',
-        type: 'symbol',
-        source: 'spots-source',
-        filter: ['has', 'point_count'],
-        layout: {
-          'text-field': ['get', 'point_count_abbreviated'],
-          'text-size': 13,
-          'text-allow-overlap': true,
-        },
-        paint: { 'text-color': '#fff' },
-      });
-      map.addLayer({
-        id: 'unclustered-point',
-        type: 'circle',
-        source: 'spots-source',
-        filter: ['!', ['has', 'point_count']],
-        paint: {
-          'circle-color': ['get', 'pinColor'],
-          'circle-radius': ['case', ['==', ['get', 'selected'], 1], 14, 9],
-          'circle-stroke-color': '#fff',
-          'circle-stroke-width': ['case', ['==', ['get', 'selected'], 1], 3, 2],
-        },
-      });
-
-      // User location dot
-      map.addSource('user-source', { type: 'geojson', data: pointCollection(user) });
-      map.addLayer({
-        id: 'user-halo',
-        type: 'circle',
-        source: 'user-source',
-        paint: { 'circle-color': 'rgba(0,200,83,0.2)', 'circle-radius': 16 },
-      });
-      map.addLayer({
-        id: 'user-dot',
-        type: 'circle',
-        source: 'user-source',
-        paint: { 'circle-color': '#00C853', 'circle-radius': 7, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
-      });
-
-      // Search location marker
-      map.addSource('search-marker-source', { type: 'geojson', data: pointCollection(search) });
-      map.addLayer({
-        id: 'search-marker-halo',
-        type: 'circle',
-        source: 'search-marker-source',
-        paint: {
-          'circle-color': 'rgba(33,150,243,0.2)',
-          'circle-radius': 22,
-          'circle-stroke-color': 'rgba(33,150,243,0.6)',
-          'circle-stroke-width': 2,
-        },
-      });
-      map.addLayer({
-        id: 'search-marker-dot',
-        type: 'circle',
-        source: 'search-marker-source',
-        paint: { 'circle-color': '#2196F3', 'circle-radius': 8, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
-      });
-
-      // Parked car marker
-      map.addSource('car-marker-source', { type: 'geojson', data: pointCollection(car) });
-      map.addLayer({
-        id: 'car-marker-dot',
-        type: 'circle',
-        source: 'car-marker-source',
-        paint: { 'circle-color': CAR_MARKER_COLOR, 'circle-radius': 12, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
-      });
-      map.addLayer({
-        id: 'car-marker-label',
-        type: 'symbol',
-        source: 'car-marker-source',
-        layout: { 'text-field': 'P', 'text-size': 13, 'text-allow-overlap': true },
-        paint: { 'text-color': '#fff' },
-      });
-
-      loadedRef.current = true;
-    });
-
-    // Cluster tap → zoom in
-    map.on('click', 'cluster-circle', e => {
-      const feature = e.features?.[0];
-      if (!feature) return;
-      const center = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
-      const source = map.getSource('spots-source') as mapboxgl.GeoJSONSource;
-      source.getClusterExpansionZoom(feature.properties?.cluster_id, (err, zoom) => {
-        map.easeTo({ center, zoom: err || zoom == null ? 16 : zoom + 1, duration: 400 });
-      });
-    });
-
-    // Individual point tap
-    map.on('click', 'unclustered-point', e => {
-      const spotId = e.features?.[0]?.properties?.id as string | undefined;
-      const spot = latest.current.spots.find(s => s.id === spotId);
-      if (spot) latest.current.onSpotPress(spot);
-    });
-
-    for (const layer of ['cluster-circle', 'unclustered-point']) {
-      map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
+    if (!token) {
+      setMapError('Mapbox token missing');
+      return;
     }
 
-    // Right-click (or long-press on touch) stands in for native long-press
-    map.on('contextmenu', e => {
-      latest.current.onLongPress({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
-    });
+    // mapbox-gl.css sets `.mapboxgl-map { position: relative }`, which beats
+    // react-native-web's class-based absolute fill and collapses the map to 0px.
+    Object.assign(node.style, { position: 'absolute', top: '0', right: '0', bottom: '0', left: '0' });
+    const resizeObserver = new ResizeObserver(() => mapRef.current?.resize());
+    resizeObserver.observe(node);
 
-    map.on('moveend', () => {
-      const c = map.getCenter();
-      if (moveDebounce) clearTimeout(moveDebounce);
-      moveDebounce = setTimeout(() => {
-        latest.current.onMapMoved({ latitude: c.lat, longitude: c.lng });
-      }, 450);
-    });
+    loadMapbox()
+      .then((mapboxgl) => {
+        if (cancelled || mapRef.current) return;
+        mapboxgl.accessToken = token;
+        const map = new mapboxgl.Map({
+          container: node,
+          style: 'mapbox://styles/mapbox/dark-v11',
+          center: [userCoordinate.longitude, userCoordinate.latitude],
+          zoom: 14,
+          attributionControl: true,
+        });
+        // Top corners sit under the app's search overlay
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
+        mapRef.current = map;
+        // Dev-only handle for poking at the map from the browser console
+        if (__DEV__) (window as any).__TEMP_MAP__ = map;
+        map.once('load', () => map.resize());
+
+        map.on('load', () => {
+          // City layers first so spot pins draw on top
+          map.addSource('overlays', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] },
+          });
+          map.addLayer({
+            id: 'overlay-fill',
+            type: 'fill',
+            source: 'overlays',
+            minzoom: OVERLAY_MIN_ZOOM,
+            filter: ['==', ['geometry-type'], 'Polygon'],
+            paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.35 },
+          });
+          map.addLayer({
+            id: 'overlay-line',
+            type: 'line',
+            source: 'overlays',
+            minzoom: OVERLAY_MIN_ZOOM,
+            filter: ['==', ['geometry-type'], 'LineString'],
+            layout: { 'line-cap': 'round', 'line-sort-key': LINE_SORT_KEY as any },
+            paint: {
+              'line-color': ['get', 'color'],
+              'line-width': LINE_WIDTH,
+              'line-opacity': LINE_OPACITY,
+              'line-offset': LINE_OFFSET as any,
+            },
+          });
+          map.addLayer({
+            id: 'overlay-lot',
+            type: 'circle',
+            source: 'overlays',
+            filter: ['==', ['get', 'kind'], 'cityLot'],
+            paint: {
+              'circle-color': ['get', 'color'],
+              'circle-radius': 11,
+              'circle-stroke-width': 1.5,
+              'circle-stroke-color': '#fff',
+            },
+          });
+          map.addLayer({
+            id: 'overlay-lot-label',
+            type: 'symbol',
+            source: 'overlays',
+            filter: ['==', ['get', 'kind'], 'cityLot'],
+            layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-offset': [0, 1.6] },
+            paint: { 'text-color': '#fff', 'text-halo-color': '#000', 'text-halo-width': 1 },
+          });
+
+          map.addSource('spots', {
+            type: 'geojson',
+            data: buildSpotsGeoJSON(spotsRef.current, null, {}),
+            cluster: true,
+            clusterMaxZoom: 15,
+            clusterRadius: 40,
+          });
+          map.addLayer({
+            id: 'clusters',
+            type: 'circle',
+            source: 'spots',
+            filter: ['has', 'point_count'],
+            paint: {
+              'circle-color': ['interpolate', ['linear'], ['get', 'point_count'], 1, '#4CAF50', 6, '#FFB300', 16, '#FF5722'],
+              'circle-radius': ['interpolate', ['linear'], ['get', 'point_count'], 1, 18, 20, 28],
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#fff',
+              'circle-opacity': 1,
+            },
+          });
+          map.addLayer({
+            id: 'cluster-count',
+            type: 'symbol',
+            source: 'spots',
+            filter: ['has', 'point_count'],
+            layout: {
+              'text-field': ['get', 'point_count_abbreviated'],
+              'text-size': 13,
+            },
+            paint: { 'text-color': '#fff' },
+          });
+          map.addLayer({
+            id: 'unclustered',
+            type: 'circle',
+            source: 'spots',
+            filter: ['!', ['has', 'point_count']],
+            paint: {
+              'circle-color': ['get', 'pinColor'],
+              'circle-radius': ['case', ['==', ['get', 'selected'], 1], 14, 9],
+              'circle-stroke-width': ['case', ['==', ['get', 'selected'], 1], 3, 2],
+              'circle-stroke-color': ['get', 'pinStroke'],
+              'circle-opacity': 1,
+            },
+          });
+          map.addSource('user', { type: 'geojson', data: pointCollection(userCoordinate) });
+          map.addLayer({
+            id: 'user-dot',
+            type: 'circle',
+            source: 'user',
+            paint: {
+              'circle-color': '#2196F3',
+              'circle-radius': 8,
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#fff',
+            },
+          });
+          map.addSource('car', { type: 'geojson', data: pointCollection(null) });
+          map.addLayer({
+            id: 'car-halo',
+            type: 'circle',
+            source: 'car',
+            paint: {
+              'circle-color': 'rgba(255,109,0,0.25)',
+              'circle-radius': 22,
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#FF6D00',
+            },
+          });
+          map.addLayer({
+            id: 'car-dot',
+            type: 'circle',
+            source: 'car',
+            paint: {
+              'circle-color': '#FF6D00',
+              'circle-radius': 8,
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#fff',
+            },
+          });
+          map.addSource('search', { type: 'geojson', data: pointCollection(null) });
+          map.addLayer({
+            id: 'search-dot',
+            type: 'circle',
+            source: 'search',
+            paint: {
+              'circle-color': '#2196F3',
+              'circle-radius': 8,
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#fff',
+            },
+          });
+
+          map.on('click', 'clusters', (event: any) => {
+            const feature = event.features?.[0];
+            const source = map.getSource('spots');
+            const clusterId = feature?.properties?.cluster_id;
+            if (!source?.getClusterExpansionZoom || clusterId == null) return;
+            source.getClusterExpansionZoom(clusterId, (err: Error | null, zoom: number) => {
+              if (err) return;
+              skipMoveRef.current = true;
+              map.easeTo({ center: feature.geometry.coordinates, zoom: zoom + 1 });
+            });
+          });
+
+          map.on('click', 'unclustered', (event: any) => {
+            const spotId = event.features?.[0]?.properties?.id as string | undefined;
+            const spot = spotsRef.current.find(item => item.id === spotId);
+            if (spot) onSpotPressRef.current(spot);
+          });
+
+          // Pins sit on top of city layers, so a pin tap must not also open the layer card
+          map.on('click', (event: any) => {
+            // Street lines are a few pixels wide; accept taps within TAP_TOLERANCE_PX
+            const { x, y } = event.point;
+            const box: [[number, number], [number, number]] = [
+              [x - TAP_TOLERANCE_PX, y - TAP_TOLERANCE_PX],
+              [x + TAP_TOLERANCE_PX, y + TAP_TOLERANCE_PX],
+            ];
+            const hits = map.queryRenderedFeatures(box, {
+              layers: ['unclustered', 'clusters', ...OVERLAY_LAYERS].filter(id => map.getLayer(id)),
+            });
+            const top = hits[0];
+            if (!top || !OVERLAY_LAYERS.includes(top.layer.id)) return;
+            if (top.properties?.kind) {
+              onOverlayPressRef.current({
+                ...top.properties,
+                tapLat: event.lngLat.lat,
+                tapLng: event.lngLat.lng,
+              } as OverlayInfo);
+            }
+          });
+
+          const pointerLayers = ['clusters', 'unclustered', 'overlay-line', 'overlay-fill', 'overlay-lot'];
+          for (const layerId of pointerLayers) {
+            map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
+          }
+          setMapLoaded(true);
+        });
+
+        map.on('moveend', () => {
+          if (skipMoveRef.current) {
+            skipMoveRef.current = false;
+            return;
+          }
+          const center = map.getCenter();
+          onMapMovedRef.current({ latitude: center.lat, longitude: center.lng });
+        });
+
+        map.on('contextmenu', (event: any) => {
+          event.originalEvent?.preventDefault?.();
+          onLongPressRef.current({ latitude: event.lngLat.lat, longitude: event.lngLat.lng });
+        });
+
+        map.on('mousedown', (event: any) => {
+          if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+          const lngLat = event.lngLat;
+          pressTimerRef.current = setTimeout(() => {
+            onLongPressRef.current({ latitude: lngLat.lat, longitude: lngLat.lng });
+          }, 650);
+        });
+        map.on('mouseup', () => {
+          if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+        });
+        map.on('movestart', () => {
+          if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+        });
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setMapError(err.message);
+      });
 
     return () => {
-      if (moveDebounce) clearTimeout(moveDebounce);
-      loadedRef.current = false;
-      map.remove();
+      cancelled = true;
+      resizeObserver.disconnect();
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+      mapRef.current?.remove();
       mapRef.current = null;
     };
+    // Map is created once. Later prop updates go through the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    (map.getSource('spots-source') as mapboxgl.GeoJSONSource | undefined)?.setData(geoJSON);
-  }, [geoJSON]);
+  const pushSpots = useCallback(() => {
+    const source = mapRef.current?.getSource('spots');
+    source?.setData(buildSpotsGeoJSON(spots, selectedSpotId, reportCounts));
+    const opacity = isCached ? 0.5 : 1;
+    if (mapRef.current?.getLayer('unclustered')) {
+      mapRef.current.setPaintProperty('unclustered', 'circle-opacity', opacity);
+      mapRef.current.setPaintProperty('clusters', 'circle-opacity', opacity);
+    }
+  }, [spots, selectedSpotId, reportCounts, isCached]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    (map.getSource('user-source') as mapboxgl.GeoJSONSource | undefined)?.setData(pointCollection(userCoordinate));
+    pushSpots();
+  }, [pushSpots, mapLoaded]);
+
+  useEffect(() => {
+    if (!mapLoaded) return;
+    mapRef.current?.getSource('overlays')?.setData(
+      buildOverlayGeoJSON(overlays, cityLots, showWinterParking),
+    );
+  }, [mapLoaded, overlays, cityLots, showWinterParking]);
+
+  useEffect(() => {
+    if (!mapLoaded) return;
+    const visibility = showOverlays ? 'visible' : 'none';
+    for (const layerId of OVERLAY_LAYERS) {
+      mapRef.current?.setLayoutProperty(layerId, 'visibility', visibility);
+    }
+  }, [mapLoaded, showOverlays]);
+
+  useEffect(() => {
+    mapRef.current?.getSource('user')?.setData(pointCollection(userCoordinate));
   }, [userCoordinate]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    (map.getSource('search-marker-source') as mapboxgl.GeoJSONSource | undefined)?.setData(pointCollection(searchMarker));
+    mapRef.current?.getSource('search')?.setData(pointCollection(searchMarker ?? null));
   }, [searchMarker]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    (map.getSource('car-marker-source') as mapboxgl.GeoJSONSource | undefined)?.setData(pointCollection(carMarker));
-  }, [carMarker]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    for (const layer of ['cluster-circle', 'unclustered-point']) {
-      map.setPaintProperty(layer, 'circle-opacity', pointOpacity);
-      map.setPaintProperty(layer, 'circle-stroke-opacity', pointOpacity);
-    }
-  }, [pointOpacity]);
+    mapRef.current?.getSource('car')?.setData(pointCollection(parkedCar ?? null));
+  }, [parkedCar, mapLoaded]);
 
   return (
     <View style={styles.container}>
-      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
-      {/* Pin color legend */}
-      <MapLegend />
+      <View ref={containerRef} style={styles.map} />
+      {mapError && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{mapError}</Text>
+        </View>
+      )}
+      <MapLegend
+        showOverlays={showOverlays}
+        onToggleOverlays={setShowOverlays}
+        showWinterParking={showWinterParking}
+      />
     </View>
   );
 });
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { flex: 1 },
+  map: { ...StyleSheet.absoluteFillObject },
+  errorBanner: {
+    position: 'absolute',
+    top: 120,
+    alignSelf: 'center',
+    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
+  errorText: { color: '#F44336', fontSize: 13 },
 });

@@ -2,42 +2,129 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Spots — readable by all, writable by any authenticated user
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // ── Spot occupancy helpers ───────────────────────────────────────────────
+    // Keep MAX_HOLD_MINUTES in app/_services/occupancy.ts under this limit.
+
+    function occupancyKeys() {
+      return ['occupied', 'occupiedSince', 'occupiedBy', 'occupiedUntil'];
+    }
+
+    function spotKeys() {
+      return ['source', 'lat', 'lng', 'type', 'feeRequired', 'timeRestrictions',
+              'seasonalBan', 'city', 'verified', 'notes'].concat(occupancyKeys());
+    }
+
+    function holdExpired(data) {
+      return data.get('occupiedUntil', null) == null
+        || data.occupiedUntil < request.time;
+    }
+
+    // Someone else holds the spot and their hold has not run out yet.
+    function heldByOther(data) {
+      return data.get('occupied', false) == true
+        && data.get('occupiedBy', null) != request.auth.uid
+        && !holdExpired(data);
+    }
+
+    function validOccupancy(data) {
+      return (
+        data.occupied == true
+        && data.occupiedBy == request.auth.uid
+        && data.occupiedSince == request.time
+        && data.occupiedUntil is timestamp
+        && data.occupiedUntil > request.time
+        && data.occupiedUntil <= request.time + duration.value(25, 'h')
+      ) || (
+        data.occupied == false
+        && data.occupiedBy == null
+        && data.occupiedSince == null
+        && data.occupiedUntil == null
+      );
+    }
+
+    // Spots — public read. Only the parked user can free a spot before its
+    // hold expires, and nobody can take a spot someone else is holding.
     match /spots/{spotId} {
       allow read: if true;
-      allow create, update: if request.auth != null;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(spotKeys())
+        && (!request.resource.data.keys().hasAny(occupancyKeys())
+            || validOccupancy(request.resource.data));
+      allow update: if signedIn()
+        && request.resource.data.keys().hasOnly(spotKeys())
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(occupancyKeys())
+            || (validOccupancy(request.resource.data) && !heldByOther(resource.data)));
       allow delete: if false;
     }
 
     // Sessions — each user can only read/write their own
     match /sessions/{sessionId} {
-      allow read, write: if request.auth != null
+      allow read, delete: if signedIn()
         && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null
+      allow create: if signedIn()
         && request.auth.uid == request.resource.data.userId;
+      allow update: if signedIn()
+        && request.auth.uid == resource.data.userId
+        && request.resource.data.userId == resource.data.userId;
+    }
+
+    // Per-user occupant markers behind the business occupancy meter. Each user
+    // can only write their own doc, so lot counts cannot be forged.
+    match /spotOccupants/{spotId}/users/{userId} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['startedAt', 'until'])
+        && request.resource.data.startedAt == request.time
+        && request.resource.data.until is timestamp
+        && request.resource.data.until <= request.time + duration.value(25, 'h');
+      allow delete: if signedIn() && request.auth.uid == userId;
     }
 
     // User-submitted spots — anyone can submit, only admins verify
     match /user_spots/{spotId} {
       allow read: if resource.data.verified == true;
-      allow create: if request.auth != null
+      allow create: if signedIn()
         && request.auth.uid == request.resource.data.submittedBy
-        && request.resource.data.verified == false;
+        && request.resource.data.verified == false
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number;
       allow update: if false; // admin only via Firebase console
-    }
-
-    // Crowd "spot taken" reports — public read, one doc per user/spot/hour
-    match /occupancyReports/{reportId} {
-      allow read: if true;
-      allow create, update: if request.auth != null
-        && request.auth.uid == request.resource.data.userId;
-      allow delete: if false;
     }
 
     // Business parking records — public read, admin write only
     match /businessParking/{id} {
       allow read: if true;
       allow write: if false; // admin only via Firebase console
+    }
+
+    // "Wrong colour?" street corrections — write-only for drivers, reviewed
+    // in the console before the dataset is rebuilt.
+    match /mapCorrections/{id} {
+      allow read, update, delete: if false;
+      allow create: if signedIn()
+        && request.auth.uid == request.resource.data.userId
+        && request.resource.data.shouldBe in ['free', 'noParking', 'paid']
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasOnly(['userId', 'kind', 'road', 'lat', 'lng', 'shouldBe', 'createdAt']);
+    }
+
+    // Crowd reports — public read so pin colors can update. One doc per
+    // user per spot, stamped with server time, so reports cannot be stacked
+    // or backdated to stay in the 2-hour window.
+    match /occupancyReports/{reportId} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && request.auth.uid == request.resource.data.userId
+        && reportId == request.auth.uid + '_' + request.resource.data.spotId
+        && request.resource.data.reportedAt == request.time;
+      allow delete: if false;
     }
   }
 }

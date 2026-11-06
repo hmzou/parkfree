@@ -11,7 +11,6 @@ interface Props {
   /** Human-readable spot description, e.g. "Street parking · Ottawa" */
   spotLabel?: string;
   onLeave: () => void;
-  /** Show the parked car on the map and offer directions back to it */
   onFindCar?: () => void;
   loading?: boolean;
 }
@@ -94,9 +93,8 @@ export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, spotLabel, 
         </View>
 
         {onFindCar && (
-          <TouchableOpacity style={styles.carBtn} onPress={onFindCar} activeOpacity={0.8}>
-            <Ionicons name="car-outline" size={18} color="#B39DDB" />
-            <Text style={styles.carBtnText}>{t('session.findCar')}</Text>
+          <TouchableOpacity style={styles.findBtn} onPress={onFindCar} activeOpacity={0.8}>
+            <Ionicons name="locate" size={18} color="#FF6D00" />
           </TouchableOpacity>
         )}
 
@@ -164,20 +162,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  carBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(124,77,255,0.15)',
+  findBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,109,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,109,0,0.35)',
     marginRight: 8,
-  },
-  carBtnText: {
-    color: '#B39DDB',
-    fontWeight: '600',
-    fontSize: 13,
   },
   leaveBtn: {
     flexDirection: 'row',

@@ -1,20 +1,17 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, Text, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { t } from '../_i18n';
-import { JUST_FREED_COLOR } from './spotGeoJSON';
+import { legendItems, MAP_COLORS } from './mapStyle';
 
-const LEGEND_ITEMS = [
-  { color: JUST_FREED_COLOR, key: 'map.legendJustFreed' },
-  { color: '#4CAF50', key: 'map.legendFree' },
-  { color: '#FFB300', key: 'map.legendTimeLimited' },
-  { color: '#9E9E9E', key: 'map.legendPermit' },
-  { color: '#FF5722', key: 'map.legendOther' },
-  { color: '#F44336', key: 'map.legendOccupied' },
-];
+interface Props {
+  showOverlays: boolean;
+  onToggleOverlays: (value: boolean) => void;
+  showWinterParking: boolean;
+}
 
 // Not memoized — needs to re-render when locale changes so t() calls update
-export const MapLegend: React.FC = () => {
+export const MapLegend: React.FC<Props> = ({ showOverlays, onToggleOverlays, showWinterParking }) => {
   const [open, setOpen] = useState(false);
   return (
     <View style={styles.legendContainer}>
@@ -28,12 +25,29 @@ export const MapLegend: React.FC = () => {
       </TouchableOpacity>
       {open && (
         <View style={styles.legendPanel}>
-          {LEGEND_ITEMS.map(item => (
-            <View key={item.color} style={styles.legendRow}>
-              <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+          {legendItems(showOverlays, showWinterParking).map(item => (
+            <View key={item.key} style={styles.legendRow}>
+              <View
+                style={[
+                  item.shape === 'line' ? styles.legendLine : styles.legendDot,
+                  item.shape === 'ring'
+                    ? { backgroundColor: MAP_COLORS.unclearFill, borderColor: item.color, borderWidth: 2 }
+                    : { backgroundColor: item.color },
+                ]}
+              />
               <Text style={styles.legendLabel}>{t(item.key)}</Text>
             </View>
           ))}
+          <View style={styles.divider} />
+          <View style={styles.legendRow}>
+            <Text style={[styles.legendLabel, styles.toggleLabel]}>{t('map.cityLayers')}</Text>
+            <Switch
+              value={showOverlays}
+              onValueChange={onToggleOverlays}
+              trackColor={{ false: '#333', true: '#00C853' }}
+              thumbColor="#fff"
+            />
+          </View>
         </View>
       )}
     </View>
@@ -49,6 +63,7 @@ const styles = StyleSheet.create({
   legendToggle: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
     gap: 4,
     backgroundColor: 'rgba(26,26,26,0.92)',
     borderRadius: 20,
@@ -76,7 +91,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 6,
     elevation: 6,
-    minWidth: 160,
+    minWidth: 200,
   },
   legendRow: {
     flexDirection: 'row',
@@ -88,8 +103,21 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
+  legendLine: {
+    width: 14,
+    height: 4,
+    borderRadius: 2,
+  },
   legendLabel: {
     color: '#CCC',
     fontSize: 12,
+  },
+  toggleLabel: {
+    flex: 1,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#333',
+    marginVertical: 2,
   },
 });

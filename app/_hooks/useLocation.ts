@@ -7,6 +7,8 @@ const OTTAWA_DEFAULT: Coordinate = { latitude: 45.4215, longitude: -75.6972 };
 
 /** Android emulators / BlueStacks often never return a GPS fix — avoid hanging forever */
 const CURRENT_POSITION_TIMEOUT_MS = 12_000;
+/** On web this wraps navigator.geolocation too, which can also never answer */
+const LAST_KNOWN_TIMEOUT_MS = 3_000;
 
 type PermissionStatus = 'undetermined' | 'granted' | 'denied';
 
@@ -26,8 +28,10 @@ function delayReject(ms: number): Promise<never> {
 async function resolveCoordinate(): Promise<Coordinate> {
   try {
     const loc = await Promise.race([
+      // A quick coarse fix gets the map up; the high-accuracy watcher below
+      // replaces it within seconds.
       Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Low,
+        accuracy: Location.Accuracy.Balanced,
       }),
       delayReject(CURRENT_POSITION_TIMEOUT_MS),
     ]);
@@ -36,12 +40,19 @@ async function resolveCoordinate(): Promise<Coordinate> {
       longitude: loc.coords.longitude,
     };
   } catch {
-    const last = await Location.getLastKnownPositionAsync();
-    if (last) {
-      return {
-        latitude: last.coords.latitude,
-        longitude: last.coords.longitude,
-      };
+    try {
+      const last = await Promise.race([
+        Location.getLastKnownPositionAsync(),
+        delayReject(LAST_KNOWN_TIMEOUT_MS),
+      ]);
+      if (last) {
+        return {
+          latitude: last.coords.latitude,
+          longitude: last.coords.longitude,
+        };
+      }
+    } catch {
+      // fall through to the default
     }
     return OTTAWA_DEFAULT;
   }
@@ -56,9 +67,11 @@ export function useLocation(): UseLocationResult {
   const startWatching = useCallback(() => {
     Location.watchPositionAsync(
       {
-        accuracy: Location.Accuracy.Balanced,
-        // Fewer updates reduce how often we re-query Overpass while user location is jittery
-        distanceInterval: 250,
+        // GPS-level accuracy: a Wi-Fi/cell fix can be a few blocks off, which
+        // matters when the question is which side of the street you're on.
+        // Spot reloads have their own 500 m threshold, so frequent updates are cheap.
+        accuracy: Location.Accuracy.High,
+        distanceInterval: 10,
       },
       loc => {
         setCoordinate({
