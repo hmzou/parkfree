@@ -15,12 +15,14 @@
 <h1>ParkFree Privacy Policy</h1>
 <p class="muted">Last updated: November 7, 2026</p>
 
-<p>ParkFree helps drivers find free street parking in Ottawa and Gatineau. This policy explains what the app collects and why. ParkFree has no accounts, no ads and no tracking.</p>
+<p>ParkFree helps drivers find free street parking in Ottawa and Gatineau. This policy explains what the app collects and why. You can use ParkFree without an account. It has no ads and no tracking.</p>
 
 <h2>What we collect</h2>
 <ul>
   <li><strong>Your location, while you use the app.</strong> Used on your phone to center the map, show the nearest free street and measure distances. When you tap "I parked here", the location of your car is saved with your parking session so the app can remind you before the time limit and show other drivers that the spot is taken. We do not track your location in the background.</li>
-  <li><strong>An anonymous ID.</strong> The app signs you in anonymously (Firebase Authentication) so your parking history belongs to you. It is not linked to your name, email or phone number.</li>
+  <li><strong>An anonymous ID.</strong> Until you create an account, the app signs you in anonymously (Firebase Authentication) so your parking history belongs to you. It is not linked to your name, email or phone number.</li>
+  <li><strong>Your account, if you create one.</strong> Your name and email address, and which sign-in method you used (email and password, Google, Microsoft or Apple). With Google, Microsoft or Apple we receive only your name, email and an account identifier from that service, never your password. Passwords are stored by Firebase Authentication, never by us in readable form. Used to sign you in, keep your history if you change phones, and send account emails (address verification and password reset).</li>
+  <li><strong>Sign photos, if you are an ambassador.</strong> When you photograph a parking sign, we store the photo, where it was taken, which way your phone was pointing, the street, and the rule you chose. The rule and street segment colour the map for everyone; your name is never shown on the map. The photo itself is visible only to you and to us, to check that the sign matches.</li>
   <li><strong>Parking sessions.</strong> Start and end time, the spot or street location, any timer you set, and a parking record: the street name, the rule the map showed you, where that rule came from and how precise your GPS position was. Shown only to you in History, and shared only if you choose to share the record (for example to contest a ticket).</li>
   <li><strong>Reports you choose to send.</strong> "Spot is full" reports and "Wrong colour?" corrections, with the location you reported. Used to keep the map accurate.</li>
 </ul>
@@ -30,19 +32,21 @@
 
 <h2>Who processes the data</h2>
 <ul>
-  <li>Google Firebase (Firestore database and anonymous sign-in) stores sessions and reports.</li>
+  <li>Google Firebase (Firestore database and Authentication) stores accounts, sessions, reports and sign photos.</li>
+  <li>If you sign in with Google, Microsoft or Apple, that company confirms who you are and shares your name and email with us.</li>
   <li>Mapbox draws the map and turns addresses you search into map positions. Search text is sent to Mapbox.</li>
   <li>Open-Meteo provides the snow forecast for winter parking warnings. It receives only a fixed Ottawa location, not yours.</li>
 </ul>
 <p>We do not sell or share your data with anyone else, and we do not use it for advertising.</p>
 
 <h2>How long we keep it</h2>
-<p>Parking sessions and reports are kept while the app is in service, so your history keeps working. A spot's "taken" status expires automatically after the session's time limit.</p>
+<p>Parking sessions, reports and sign photos are kept while your account (or anonymous ID) exists, so your history keeps working. A spot's "taken" status, shown to other drivers as an orange dot without any name, expires automatically after the session's time limit.</p>
 
 <h2>Your choices</h2>
 <ul>
   <li>You can turn off location at any time in your phone's settings. The map still works around downtown Ottawa.</li>
-  <li>To delete your parking history and reports, email us with the session ID shown in the app's Profile tab.</li>
+  <li><strong>Delete your account in the app:</strong> Profile → Account → Delete account. This permanently deletes your account, parking history, parking records and sign photos.</li>
+  <li>Without the app, or if you never made an account, email us to delete your data. See <a href="delete-account.html">how to delete your data</a>.</li>
 </ul>
 
 <h2>Children</h2>
@@ -56,12 +60,14 @@
 <h1 lang="fr">Politique de confidentialité de ParkFree</h1>
 <div lang="fr">
 <p class="muted">Dernière mise à jour : 7 novembre 2026</p>
-<p>ParkFree aide les conducteurs à trouver du stationnement gratuit dans la rue à Ottawa et à Gatineau. Pas de compte, pas de publicité, pas de pistage.</p>
+<p>ParkFree aide les conducteurs à trouver du stationnement gratuit dans la rue à Ottawa et à Gatineau. Le compte est facultatif. Pas de publicité, pas de pistage.</p>
 
 <h2>Ce que nous recueillons</h2>
 <ul>
   <li><strong>Votre position, pendant l'utilisation de l'application.</strong> Elle sert sur votre téléphone à centrer la carte, à trouver la rue gratuite la plus proche et à calculer les distances. Lorsque vous touchez « Je suis stationné ici », la position de votre voiture est enregistrée avec votre session afin de vous rappeler l'heure limite et d'indiquer aux autres conducteurs que la place est prise. Aucun suivi en arrière-plan.</li>
-  <li><strong>Un identifiant anonyme</strong> (Firebase Authentication), non lié à votre nom, courriel ou numéro de téléphone.</li>
+  <li><strong>Un identifiant anonyme</strong> (Firebase Authentication) tant que vous n'avez pas de compte, non lié à votre nom, courriel ou numéro de téléphone.</li>
+  <li><strong>Votre compte, si vous en créez un</strong> : nom, adresse courriel et mode de connexion (courriel et mot de passe, Google, Microsoft ou Apple). Avec Google, Microsoft ou Apple, nous recevons seulement votre nom, votre courriel et un identifiant, jamais votre mot de passe. Les mots de passe sont gérés par Firebase Authentication et jamais conservés en clair par nous.</li>
+  <li><strong>Photos de panneaux, si vous êtes ambassadeur</strong> : la photo, l'endroit, la direction du téléphone, la rue et la règle choisie. La règle colore la carte pour tous, sans votre nom. La photo n'est visible que par vous et par nous, pour vérifier le panneau.</li>
   <li><strong>Vos sessions de stationnement</strong> : heures, emplacement, minuterie et preuve de stationnement (nom de la rue, règle affichée, sa provenance et la précision du GPS). Visibles par vous seul dans l'Historique, et partagées seulement si vous choisissez de partager la preuve (par exemple pour contester une contravention).</li>
   <li><strong>Les signalements que vous envoyez</strong> (« place pleine », « mauvaise couleur ») et leur position, pour garder la carte exacte.</li>
 </ul>
@@ -70,10 +76,10 @@
 <p>La position enregistrée de votre voiture, votre langue et les données de carte en cache.</p>
 
 <h2>Fournisseurs</h2>
-<p>Google Firebase (base de données et connexion anonyme), Mapbox (carte et recherche d'adresses) et Open-Meteo (prévisions de neige pour une position fixe à Ottawa). Nous ne vendons ni ne partageons vos données, et ne les utilisons pas à des fins publicitaires.</p>
+<p>Google Firebase (base de données et authentification), Google, Microsoft ou Apple si vous vous connectez avec eux, Mapbox (carte et recherche d'adresses) et Open-Meteo (prévisions de neige pour une position fixe à Ottawa). Nous ne vendons ni ne partageons vos données, et ne les utilisons pas à des fins publicitaires.</p>
 
 <h2>Vos choix</h2>
-<p>Vous pouvez désactiver la localisation dans les réglages de votre téléphone. Pour supprimer votre historique, écrivez-nous avec l'identifiant de session affiché dans l'onglet Profil.</p>
+<p>Vous pouvez désactiver la localisation dans les réglages de votre téléphone. Pour supprimer votre compte et toutes vos données : Profil → Compte → Supprimer le compte. Sans l'application, écrivez-nous (voir <a href="delete-account.html">supprimer vos données</a>).</p>
 
 <h2>Contact</h2>
 <p><a href="mailto:YOUR-CONTACT-EMAIL">YOUR-CONTACT-EMAIL</a></p>

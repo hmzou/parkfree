@@ -24,7 +24,8 @@ import { OverlayInfoCard, streetUntilText } from '../_components/OverlayInfoCard
 import { buildSpotRecord, buildStreetRecord } from '../_services/parkingRecord';
 import { WinterBanner } from '../_components/WinterBanner';
 import { DirectionsModal } from '../_components/DirectionsModal';
-import type { OverlayInfo } from '../_components/mapStyle';
+import { MAP_COLORS, type OverlayInfo } from '../_components/mapStyle';
+import { router } from 'expo-router';
 
 import { useLocation } from '../_hooks/useLocation';
 import { useSpots } from '../_hooks/useSpots';
@@ -71,6 +72,7 @@ export default function MapScreen() {
     coordinate,
     permissionStatus,
     loading: locationLoading,
+    locating,
     hasFix,
     accuracyMeters,
     requestPermission,
@@ -93,6 +95,7 @@ export default function MapScreen() {
   const {
     spots,
     overlays,
+    takenSpots,
     coversRegion,
     loading: spotsLoading,
     isCached,
@@ -131,6 +134,7 @@ export default function MapScreen() {
   const [stayFinderVisible, setStayFinderVisible] = useState(false);
   const [confirmedOnly, setConfirmedOnly] = useState(false);
   const [freeNow, setFreeNow] = useState(false);
+  const [showTaken, setShowTaken] = useState(true);
   const [carDirections, setCarDirections] = useState(false);
 
   const visibleSpots = useMemo(
@@ -524,6 +528,8 @@ export default function MapScreen() {
         overlays={overlays}
         cityLots={cityLots}
         showWinterParking={winter.ottawaSeason}
+        takenSpots={takenSpots}
+        showTaken={showTaken && !freeNow}
         onSpotPress={handleSpotPress}
         onOverlayPress={handleOverlayPress}
         onMapMoved={handleMapMoved}
@@ -592,6 +598,25 @@ export default function MapScreen() {
               {t('map.confirmedOnly')}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.chip, showTaken && styles.chipTakenActive]}
+            onPress={() => setShowTaken(v => !v)}
+            activeOpacity={0.85}
+            accessibilityState={{ selected: showTaken }}
+          >
+            <View style={[styles.takenDot, !showTaken && { opacity: 0.35 }]} />
+            <Text style={styles.chipText}>
+              {takenSpots.length > 0 ? t('map.takenCount', { count: takenSpots.length }) : t('map.taken')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.chip}
+            onPress={() => router.push('/ambassador')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="camera-outline" size={14} color="#00C853" />
+            <Text style={styles.chipText}>{t('map.photoSign')}</Text>
+          </TouchableOpacity>
           {car && !session && (
             <TouchableOpacity style={styles.chip} onPress={handleFindCar} activeOpacity={0.85}>
               <Ionicons name="car-sport-outline" size={14} color="#FF6D00" />
@@ -603,7 +628,7 @@ export default function MapScreen() {
         {/* Permission granted but no position: the OS or browser is still
             blocking location. Say so instead of pretending you're downtown. */}
         {permissionStatus === 'granted' && !hasFix && !locationLoading && (
-          <TouchableOpacity style={styles.offlineBanner} onPress={handleLocateMe} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.offlineBanner} onPress={handleLocateMe} disabled={locating} activeOpacity={0.85}>
             <Ionicons name="warning-outline" size={14} color="#FFB300" />
             <Text style={[styles.offlineBannerText, { flex: 1 }]} numberOfLines={2}>
               {t(Platform.OS === 'web' ? 'map.noFixWeb' : 'map.noFix')}
@@ -683,6 +708,14 @@ export default function MapScreen() {
             info={overlayInfo}
             onDismiss={() => setOverlayInfo(null)}
             onParkHere={session ? undefined : (minutes) => { void handleParkOnStreet(overlayInfo, minutes); }}
+            onPhotoSign={() => {
+              const lat = Number(overlayInfo.tapLat);
+              const lng = Number(overlayInfo.tapLng);
+              setOverlayInfo(null);
+              router.push(Number.isFinite(lat) && Number.isFinite(lng)
+                ? { pathname: '/ambassador', params: { lat: String(lat), lng: String(lng) } }
+                : '/ambassador');
+            }}
           />
         )}
       </View>
@@ -724,10 +757,13 @@ export default function MapScreen() {
       <TouchableOpacity
         style={[styles.locateBtn, { bottom: insets.bottom + (session ? 110 : 90) }]}
         onPress={handleLocateMe}
+        disabled={locating}
         activeOpacity={0.85}
         accessibilityLabel={t('map.locateMe')}
       >
-        <Ionicons name={hasFix ? 'locate' : 'locate-outline'} size={22} color={hasFix ? '#2196F3' : '#AAA'} />
+        {locating
+          ? <ActivityIndicator size="small" color="#2196F3" />
+          : <Ionicons name={hasFix ? 'locate' : 'locate-outline'} size={22} color={hasFix ? '#2196F3' : '#AAA'} />}
       </TouchableOpacity>
 
       {/* FAB — Add Spot (hidden during active session) */}
@@ -855,6 +891,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  chipTakenActive: {
+    borderColor: MAP_COLORS.taken,
+  },
+  takenDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: MAP_COLORS.taken,
+    borderWidth: 1.5,
+    borderColor: '#fff',
   },
   chip: {
     flexDirection: 'row',

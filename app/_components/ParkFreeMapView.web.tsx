@@ -11,9 +11,12 @@ import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
 import type { CityLot } from '../_services/cityLots';
 import { MapLegend } from './MapLegend';
+import type { TakenSpot } from '../_hooks/useSpots';
 import {
   buildOverlayGeoJSON,
   buildSpotsGeoJSON,
+  buildTakenGeoJSON,
+  MAP_COLORS,
   LINE_OPACITY,
   LINE_WIDTH,
   LINE_SORT_KEY,
@@ -46,6 +49,9 @@ interface Props {
   overlays: GeoJSON.FeatureCollection;
   cityLots: CityLot[];
   showWinterParking: boolean;
+  /** Street spots someone is parked in, drawn orange */
+  takenSpots: TakenSpot[];
+  showTaken: boolean;
   onSpotPress: (spot: ParkingSpot) => void;
   onOverlayPress: (info: OverlayInfo) => void;
   onMapMoved: (coord: Coordinate) => void;
@@ -128,6 +134,8 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   overlays,
   cityLots,
   showWinterParking,
+  takenSpots,
+  showTaken,
   onSpotPress,
   onOverlayPress,
   onMapMoved,
@@ -143,6 +151,8 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   const [showOverlays, setShowOverlays] = useState(true);
 
   spotsRef.current = spots;
+  const takenRef = useRef(takenSpots);
+  takenRef.current = takenSpots;
 
   const onSpotPressRef = useRef(onSpotPress);
   const onOverlayPressRef = useRef(onOverlayPress);
@@ -226,7 +236,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
             type: 'line',
             source: 'overlays',
             minzoom: OVERLAY_MIN_ZOOM,
-            filter: ['==', ['geometry-type'], 'LineString'],
+            filter: ['in', ['geometry-type'], ['literal', ['LineString', 'MultiLineString']]],
             layout: { 'line-cap': 'round', 'line-sort-key': LINE_SORT_KEY as any },
             paint: {
               'line-color': ['get', 'color'],
@@ -300,6 +310,33 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
               'circle-opacity': 1,
             },
           });
+          // Taken: someone is parked on this street spot right now
+          map.addSource('taken', { type: 'geojson', data: buildTakenGeoJSON([]) });
+          map.addLayer({
+            id: 'taken-dot',
+            type: 'circle',
+            source: 'taken',
+            minzoom: OVERLAY_MIN_ZOOM,
+            paint: {
+              'circle-color': MAP_COLORS.taken,
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 4, 17, 8],
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#fff',
+            },
+          });
+          map.on('click', 'taken-dot', (event: any) => {
+            const id = event.features?.[0]?.properties?.id as string | undefined;
+            const spot = takenRef.current.find(item => item.id === id);
+            if (!spot) return;
+            event.originalEvent?.stopPropagation?.();
+            onOverlayPressRef.current({
+              kind: 'taken',
+              until: spot.until ? spot.until.toISOString() : null,
+              tapLat: spot.lat,
+              tapLng: spot.lng,
+            } as OverlayInfo);
+          });
+
           map.addSource('user', {
             type: 'geojson',
             data: userGeoJSON(userCoordinateRef.current, userAccuracyRef.current),
@@ -395,7 +432,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
               [x + TAP_TOLERANCE_PX, y + TAP_TOLERANCE_PX],
             ];
             const hits = map.queryRenderedFeatures(box, {
-              layers: ['unclustered', 'clusters', ...OVERLAY_LAYERS].filter(id => map.getLayer(id)),
+              layers: ['taken-dot', 'unclustered', 'clusters', ...OVERLAY_LAYERS].filter(id => map.getLayer(id)),
             });
             const top = hits[0];
             if (!top || !OVERLAY_LAYERS.includes(top.layer.id)) return;
@@ -408,7 +445,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
             }
           });
 
-          const pointerLayers = ['clusters', 'unclustered', 'overlay-line', 'overlay-fill', 'overlay-lot'];
+          const pointerLayers = ['taken-dot', 'clusters', 'unclustered', 'overlay-line', 'overlay-fill', 'overlay-lot'];
           for (const layerId of pointerLayers) {
             map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
             map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
@@ -487,6 +524,12 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
       mapRef.current?.setLayoutProperty(layerId, 'visibility', visibility);
     }
   }, [mapLoaded, showOverlays]);
+
+  useEffect(() => {
+    if (!mapLoaded) return;
+    mapRef.current?.getSource('taken')?.setData(buildTakenGeoJSON(takenSpots));
+    mapRef.current?.setLayoutProperty('taken-dot', 'visibility', showTaken ? 'visible' : 'none');
+  }, [mapLoaded, takenSpots, showTaken]);
 
   useEffect(() => {
     mapRef.current?.getSource('user')?.setData(userGeoJSON(userCoordinate, userAccuracyMeters));

@@ -108,11 +108,23 @@ const LAYERS: LayerSpec[] = [
     maxAllowableOffset: 0.00003,
     extra: { basis: 'default', city: 'Ottawa' },
   },
+  // Collectors and arterials: the default rule may be overridden by signs, so
+  // they are drawn grey ("check the signs") until OSM curbs, city meters or an
+  // ambassador's sign photo tell us the answer.
+  {
+    id: 3,
+    kind: 'unknown',
+    service: STREETS,
+    where: "SUBCLASS IN ('ARTERIAL','MAJCOLLECTOR','COLLECTOR','ROUNDABOUT') AND OWNERSHIP='PUBLIC' AND CURRENT_STATUS='OPERATIONAL'",
+    fields: { road: 'ROAD_NAME_FULL' },
+    maxAllowableOffset: 0.00003,
+    extra: { basis: 'none', city: 'Ottawa' },
+  },
   {
     id: 3,
     kind: 'noParking',
     service: STREETS,
-    where: "SUBCLASS IN ('FREEWAY','HIGHWAY','RAMP','TRANSITWAY','BUSONLY') AND CURRENT_STATUS='OPERATIONAL'",
+    where: "SUBCLASS IN ('FREEWAY','HIGHWAY','RAMP','TRANSITWAY','BUSONLY','PARKWAY') AND CURRENT_STATUS='OPERATIONAL'",
     fields: { road: 'ROAD_NAME_FULL' },
     maxAllowableOffset: 0.00003,
     extra: { city: 'Ottawa' },
@@ -370,6 +382,17 @@ function dropFreeWherePaid(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
 
 /** Where OSM records a street's curbs, its side lines replace the centreline guess. */
 const OSM_MATCH_METRES = 12;
+/** A grey "unknown" road is hidden wherever any coloured line already answers it. */
+function dropUnknownWhereAnswered(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
+  return dropCovered(
+    features,
+    f => f.properties?.kind === 'unknown',
+    f => ['street', 'paid', 'noParking', 'permit', 'free15'].includes(f.properties?.kind),
+    OSM_MATCH_METRES,
+    0.5,
+  );
+}
+
 function dropDefaultWhereMapped(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
   return dropCovered(
     features,
@@ -498,20 +521,69 @@ async function fetchGatineauStreets(): Promise<GeoJSON.Feature[]> {
     const highway = p.HIERARCHI === 'Autoroute' || p.TYPE === 'Bretelle';
     const local = p.HIERARCHI === 'Rue locale'
       && ['Standard', 'Cul-de-sac carré', 'Cul-de-sac circulaire', 'Jointure'].includes(p.TYPE);
-    if (!highway && !local) continue;
     const lines = lineParts(f.geometry).map(compactLine).filter(l => l.length >= 2);
     if (lines.length === 0) continue;
-    if (local && lines.some(l => insideBox(l, HULL_PAID_CORE))) continue;
+    // Collectors, arterials and downtown Hull: drawn grey until someone checks the signs
+    const unknown = !highway && (!local || lines.some(l => insideBox(l, HULL_PAID_CORE)));
     const geometry: GeoJSON.Geometry = lines.length === 1
       ? { type: 'LineString', coordinates: lines[0] }
       : { type: 'MultiLineString', coordinates: lines };
     const properties: Record<string, string | number> = highway
       ? { kind: 'noParking', city: 'Gatineau' }
-      : { kind: 'street', basis: 'default', city: 'Gatineau' };
+      : unknown
+        ? { kind: 'unknown', basis: 'none', city: 'Gatineau' }
+        : { kind: 'street', basis: 'default', city: 'Gatineau' };
     if (p.NOM_TOPO) properties.road = p.NOM_TOPO;
     features.push({ type: 'Feature', geometry, properties });
   }
   return features;
+}
+
+/** Simplify every line (Ottawa's service returns more points than a phone needs). */
+function compactFeature(f: GeoJSON.Feature): GeoJSON.Feature {
+  if (!f.geometry || (f.geometry.type !== 'LineString' && f.geometry.type !== 'MultiLineString')) return f;
+  const lines = lineParts(f.geometry).map(compactLine).filter(l => l.length >= 2);
+  if (lines.length === 0) return f;
+  const properties = { ...f.properties };
+  if (properties.basis === 'none') delete properties.basis;
+  return {
+    type: 'Feature',
+    geometry: lines.length === 1
+      ? { type: 'LineString', coordinates: lines[0] }
+      : { type: 'MultiLineString', coordinates: lines },
+    properties,
+  };
+}
+
+/**
+ * Blocks of one street with identical properties become one MultiLineString:
+ * the road name and rule are stored once instead of per block, which roughly
+ * halves the file. Tapping any block still shows the same card.
+ */
+function mergeSameStreet(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
+  const groups = new Map<string, { properties: GeoJSON.GeoJsonProperties; lines: number[][][] }>();
+  const out: GeoJSON.Feature[] = [];
+  for (const f of features) {
+    const g = f.geometry;
+    if (!g || (g.type !== 'LineString' && g.type !== 'MultiLineString') || !f.properties?.road) {
+      out.push(f);
+      continue;
+    }
+    const key = JSON.stringify(Object.entries(f.properties).sort(([a], [b]) => a.localeCompare(b)));
+    const group = groups.get(key) ?? { properties: f.properties, lines: [] };
+    group.lines.push(...lineParts(g));
+    groups.set(key, group);
+  }
+  for (const { properties, lines } of groups.values()) {
+    out.push({
+      type: 'Feature',
+      geometry: lines.length === 1
+        ? { type: 'LineString', coordinates: lines[0] }
+        : { type: 'MultiLineString', coordinates: lines },
+      properties,
+    });
+  }
+  return out;
 }
 
 function readPrevious(): ParkFreeDataset | null {
@@ -572,8 +644,12 @@ async function main() {
   const beforePaid = cleaned.length;
   cleaned = dropFreeWherePaid(cleaned);
   console.log(`Removed ${beforePaid - cleaned.length} green segments that have paid curbs`);
+  const beforeUnknown = cleaned.length;
+  cleaned = dropUnknownWhereAnswered(cleaned);
+  console.log(`Hid ${beforeUnknown - cleaned.length} grey roads that already have an answer`);
+  console.log(`Grey "check the signs" roads: ${cleaned.filter(f => f.properties?.kind === 'unknown').length}`);
   overlays.length = 0;
-  overlays.push(...cleaned);
+  overlays.push(...mergeSameStreet(cleaned.map(compactFeature)));
 
   const dataset: ParkFreeDataset = {
     version: 1,

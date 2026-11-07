@@ -9,13 +9,21 @@ const OTTAWA_DEFAULT: Coordinate = { latitude: 45.4215, longitude: -75.6972 };
 const CURRENT_POSITION_TIMEOUT_MS = 12_000;
 /** On web this wraps navigator.geolocation too, which can also never answer */
 const LAST_KNOWN_TIMEOUT_MS = 3_000;
+/**
+ * Android can leave the permission request unanswered behind its own "Location
+ * Accuracy" dialog; never let that keep the app on the loading screen.
+ */
+const PERMISSION_TIMEOUT_MS = 15_000;
 
 type PermissionStatus = 'undetermined' | 'granted' | 'denied';
 
 interface UseLocationResult {
   coordinate: Coordinate;
   permissionStatus: PermissionStatus;
+  /** Only the first launch: the map is hidden until the first answer */
   loading: boolean;
+  /** A retry from the map is running; the map stays on screen */
+  locating: boolean;
   /**
    * True only once a real position has arrived. Until then `coordinate` is the
    * downtown Ottawa fallback and must not be drawn as "you are here" — a
@@ -85,6 +93,7 @@ export function useLocation(): UseLocationResult {
   const [coordinate, setCoordinate] = useState<Coordinate>(OTTAWA_DEFAULT);
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>('undetermined');
   const [loading, setLoading] = useState(true);
+  const [locating, setLocating] = useState(false);
   const [hasFix, setHasFix] = useState(false);
   const [accuracyMeters, setAccuracyMeters] = useState<number | null>(null);
 
@@ -123,10 +132,12 @@ export function useLocation(): UseLocationResult {
       });
   }, [applyFix]);
 
-  const requestPermission = useCallback(async () => {
-    setLoading(true);
+  const askAndLocate = useCallback(async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Promise.race([
+        Location.requestForegroundPermissionsAsync(),
+        delayReject(PERMISSION_TIMEOUT_MS),
+      ]);
       if (status === 'granted') {
         setPermissionStatus('granted');
         applyFix(await resolveCoordinate());
@@ -134,16 +145,28 @@ export function useLocation(): UseLocationResult {
       } else {
         setPermissionStatus('denied');
       }
-    } catch {
-      setPermissionStatus('denied');
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      // A timeout means Android never answered: keep what we knew, don't claim "denied"
+      if ((err as Error)?.message !== 'location-timeout') setPermissionStatus('denied');
     }
   }, [startWatching, applyFix]);
 
+  /** Retry from the map ("find me", "Retry"): never hides the map behind the loading screen. */
+  const requestPermission = useCallback(async () => {
+    setLocating(true);
+    try {
+      await askAndLocate();
+    } finally {
+      setLocating(false);
+    }
+  }, [askAndLocate]);
+
   useEffect(() => {
     (async () => {
-      const { status } = await Location.getForegroundPermissionsAsync();
+      const { status } = await Promise.race([
+        Location.getForegroundPermissionsAsync(),
+        delayReject(PERMISSION_TIMEOUT_MS),
+      ]);
       if (status === 'granted') {
         setPermissionStatus('granted');
         applyFix(await resolveCoordinate());
@@ -151,17 +174,16 @@ export function useLocation(): UseLocationResult {
       } else if (status === 'denied') {
         setPermissionStatus('denied');
       } else {
-        await requestPermission();
-        return;
+        await askAndLocate();
       }
       setLoading(false);
-    })();
+    })().catch(() => setLoading(false));
 
     return () => {
       stopWatcher(watcherRef.current);
       watcherRef.current = null;
     };
-  }, [requestPermission, startWatching, applyFix]);
+  }, [askAndLocate, startWatching, applyFix]);
 
-  return { coordinate, permissionStatus, loading, hasFix, accuracyMeters, requestPermission };
+  return { coordinate, permissionStatus, loading, locating, hasFix, accuracyMeters, requestPermission };
 }
