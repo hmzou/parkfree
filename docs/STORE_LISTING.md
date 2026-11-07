@@ -81,6 +81,6 @@ Suggested shots: (1) the coloured street map, (2) a street card with "Free now Â
 
 1. **Google Play:** finish developer account setup (identity verification) in Play Console. New personal accounts must run a **closed test with at least 12 testers for 14 days** before they can publish to production.
 2. **Apple:** an active Apple Developer Program membership (US$99/year), then create the app in App Store Connect with bundle ID `com.parkfree.app`.
-3. **Expo:** `npx eas-cli login` with the `hmzou` account (builds run on Expo's servers).
+3. **Expo:** Done: logged in as `hamzatheapp`; project `@hamzatheapp/parkfree`. The `.env` values are already EAS environment variables.
 4. **Mapbox:** create a secret token with the `DOWNLOADS:READ` scope and save it as the EAS secret `MAPBOX_SECRET_TOKEN` (native builds can't download the Mapbox SDK without it).
-5. **EAS environment:** add the values from `.env` as EAS environment variables. `.env` is not uploaded with builds because it is git-ignored.
+5. **EAS environment:** done for the `.env` values. Update them with `eas env:create --force` if a key changes.
