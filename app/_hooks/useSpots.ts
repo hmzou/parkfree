@@ -85,6 +85,8 @@ interface UseSpotsResult {
   error: string | null;
   reportCounts: Record<string, number>;
   now: Date;
+  /** When the map data in use was built (ISO 8601) */
+  dataAsOf: string;
   refresh: (coord: Coordinate, options?: RefreshOptions) => Promise<ParkingSpot[] | null>;
 }
 
@@ -287,6 +289,7 @@ export function useSpots(ruleContext: RuleContext = {}): UseSpotsResult {
     error,
     reportCounts,
     now,
+    dataAsOf: dataset.generatedAt,
     refresh,
   };
 }

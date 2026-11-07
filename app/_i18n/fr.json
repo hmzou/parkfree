@@ -41,7 +41,8 @@
     "noFixWeb": "Position introuvable — centre-ville d’Ottawa affiché. Activez le service de localisation pour ce navigateur dans les réglages de l’ordinateur.",
     "locateMe": "Afficher ma position",
     "nearestFree": "Stationnement gratuit sur %{road}",
-    "nearestFreeSub": "à %{distance} · gratuit jusqu’à %{time}"
+    "nearestFreeSub": "à %{distance} · %{until}",
+    "legendStreetDefault": "Gratuit selon la règle par défaut — vérifiez les panneaux"
   },
   "rules": {
     "okUntil": "Permis jusqu'à %{time}",
@@ -97,7 +98,20 @@
     "shouldBe": "Ça devrait être :",
     "correctionThanks": "Merci — nous allons vérifier et corriger la carte.",
     "freeNowUntil": "Gratuit maintenant · jusqu’à %{time} (sauf indication contraire)",
-    "parkedHere": "Je suis stationné ici · rappel avant %{time}"
+    "parkedHere": "Je suis stationné ici · rappel avant %{time}",
+    "untilTime": "gratuit jusqu’à %{time}",
+    "noTimeLimit": "gratuit, sans limite de temps",
+    "bannedUntil": "interdit jusqu’à %{time}",
+    "freeNowNoLimit": "Gratuit maintenant · sans limite de temps (sauf indication contraire)",
+    "bannedNow": "Interdiction hivernale de nuit · permis de nouveau à %{time}",
+    "gatineauDefaultDetail": "Sans panneau = gratuit, sans limite de temps (règlement 300-2006 de Gatineau). Du 1er décembre au 1er avril : interdit de 0 h à 6 h en semaine et de 3 h à 6 h la fin de semaine. La signalisation a toujours priorité.",
+    "mappedFreeDetail": "Stationnement permis de ce côté de la rue, selon les panneaux relevés par les contributeurs d’OpenStreetMap.",
+    "mappedNoDetail": "Stationnement interdit de ce côté de la rue, selon les panneaux relevés par les contributeurs d’OpenStreetMap.",
+    "mappedMaxstay": "Limite affichée : %{limit}",
+    "defaultBasis": "Les panneaux de ce tronçon n’ont pas encore été vérifiés — c’est la règle par défaut de la ville. Vérifiez la signalisation.",
+    "sourceOsm": "Source : contributeurs d’OpenStreetMap",
+    "sourceGatineau": "Source : données ouvertes de la Ville de Gatineau",
+    "parkedHereNoLimit": "Je suis stationné ici"
   },
   "car": {
     "saved": "Emplacement enregistré sur ce téléphone",
@@ -163,7 +177,8 @@
     "expiredMessage": "Votre minuterie de stationnement a expiré à %{spot}.",
     "warningTitle": "Stationnement bientôt expiré",
     "warningMessage": "Votre stationnement expire dans %{minutes} minutes.",
-    "timeLeftLong": "%{duration} restant"
+    "timeLeftLong": "%{duration} restant",
+    "parkedFor": "Stationné depuis %{duration} · sans limite"
   },
   "directions": {
     "title": "Obtenir l'itinéraire",
@@ -240,5 +255,41 @@
     "spotsUsed": "%{used} / %{total} places utilisées",
     "lotFull": "Ce stationnement est plein",
     "nearestFreeIs": "Le stationnement gratuit le plus proche est à %{distance}"
+  },
+  "common": {
+    "close": "Fermer"
+  },
+  "record": {
+    "title": "Preuve de stationnement — ParkFree",
+    "intro": "Utilisez-la si vous recevez une contravention que vous jugez injustifiée : elle indique quand et où vous étiez stationné et la règle affichée par la carte.",
+    "open": "Preuve de stationnement",
+    "id": "Numéro de la preuve",
+    "parkedAt": "Stationné le",
+    "leftAt": "Parti le",
+    "stillParked": "Toujours stationné",
+    "location": "Emplacement",
+    "mapLink": "Carte",
+    "position": "Comment la position a été relevée",
+    "positionGps": "GPS du téléphone, précis à environ %{meters} m",
+    "positionMap": "Point touché sur la carte",
+    "ruleShown": "Règle affichée par l’application",
+    "allowedUntil": "Permis jusqu’à",
+    "postedLimit": "Limite affichée (relevée)",
+    "ruleSource": "Provenance de la règle",
+    "dataAsOf": "Données de la carte au",
+    "withinLimit": "Parti avant la limite",
+    "yes": "Oui",
+    "no": "Non",
+    "verdictPaid": "Stationnement payant, max %{hours} h",
+    "basisOsm": "Panneaux de bordure relevés par les contributeurs d’OpenStreetMap",
+    "basisDefaultOttawa": "Règle par défaut de la Ville d’Ottawa pour les rues sans panneau (règlement 2017-301 : 3 h en semaine de 7 h à 19 h, 6 h la fin de semaine)",
+    "basisDefaultGatineau": "Règle par défaut de la Ville de Gatineau pour les rues sans panneau (règlement 300-2006 : sans limite de temps; interdiction hivernale de nuit du 1er décembre au 1er avril)",
+    "basisCity": "Données de stationnement de la Ville d’Ottawa (parcomètres, zones de permis et de 15 minutes)",
+    "basisOther": "Données de l’emplacement affichées sur la carte",
+    "integrity": "Les heures d’arrivée et de départ ont été fixées par l’horloge du serveur de ParkFree, pas par le téléphone, et l’emplacement et la règle ne peuvent plus être modifiés après la création de la preuve.",
+    "disclaimer": "ParkFree n’est pas affilié à la Ville d’Ottawa ni à la Ville de Gatineau. La signalisation a priorité sur la carte. Ajoutez vos propres photos de la voiture et des panneaux pour contester une contravention.",
+    "noSnapshot": "Cette session date d’avant l’enregistrement de la règle affichée : seules les heures et l’emplacement sont disponibles.",
+    "share": "Partager ou enregistrer la preuve",
+    "shareFailed": "Impossible d’ouvrir le partage. Autorisez les fenêtres contextuelles pour ce site ou copiez le texte ci-dessus."
   }
 }

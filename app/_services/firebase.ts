@@ -31,7 +31,7 @@ import {
   QuerySnapshot,
 } from 'firebase/firestore';
 import Constants from 'expo-constants';
-import { ParkingSpot, ParkingSession, UserSpotSubmission, SpotType, OccupancyReport } from '../_types';
+import { ParkingSpot, ParkingSession, ParkingRecord, UserSpotSubmission, SpotType, OccupancyReport } from '../_types';
 
 /**
  * Use AsyncStorage-backed auth when the native module exists (current dev/release build).
@@ -274,8 +274,10 @@ export async function startSession(
   warnMinutes?: number,
   spotType?: string,
   spotCity?: string,
+  record?: ParkingRecord,
 ): Promise<string> {
   const ref = await addDoc(collection(db, 'sessions'), {
+    ...(record ? { record } : {}),
     spotId,
     userId,
     lat,
@@ -315,6 +317,7 @@ function sessionFromDoc(id: string, data: DocumentData): ParkingSession {
     spotType: data.spotType ?? 'street',
     spotCity: data.spotCity ?? 'Unknown',
     hitLimit: data.hitLimit ?? false,
+    record: data.record ?? undefined,
   };
 }
 

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocale, t } from '../_i18n';
 import { formatWhen } from '../_i18n/time';
-import { ottawaDefaultLeaveBy } from '../_services/parkingRules';
+import { streetStayMinutes, streetVerdict } from '../_services/parkingRules';
 import { prettyRoad } from '../_services/nearestStreet';
 import { MAP_COLORS, OverlayInfo } from './mapStyle';
 import { ensureAnonymousAuth, submitMapCorrection, StreetColor } from '../_services/firebase';
@@ -15,9 +15,47 @@ const CORRECTIONS: { color: StreetColor; key: string; swatch: string }[] = [
   { color: 'paid', key: 'map.legendStreetPaid', swatch: MAP_COLORS.streetPaid },
 ];
 
-/** SpotAngels-style verdict for an unsigned Ottawa street: when must a car parked now move? */
-function freeUntilLine(now: Date = new Date()): string {
-  return t('overlay.freeNowUntil', { time: formatWhen(ottawaDefaultLeaveBy(now), now) });
+/**
+ * Short verdict for a free street line, e.g. "free until 3:40 p.m.", "free, no
+ * time limit" or "no parking until 6:00 a.m.". Used by the glance and search cards.
+ */
+export function streetUntilText(props: OverlayInfo | Record<string, unknown>, now: Date = new Date()): string {
+  if (props.kind === 'free15') return t('overlay.untilTime', { time: formatWhen(new Date(now.getTime() + 15 * 60_000), now) });
+  const verdict = streetVerdict(props, now);
+  if (verdict.level === 'banned' && verdict.allowedFrom) {
+    return t('overlay.bannedUntil', { time: formatWhen(verdict.allowedFrom, now) });
+  }
+  if (!verdict.leaveBy) return t('overlay.noTimeLimit');
+  return t('overlay.untilTime', { time: formatWhen(verdict.leaveBy, now) });
+}
+
+/** SpotAngels-style verdict line for the street card: what does a car parked now get? */
+function freeUntilLine(info: OverlayInfo, now: Date = new Date()): string {
+  const verdict = streetVerdict(info, now);
+  if (verdict.level === 'banned' && verdict.allowedFrom) {
+    return t('overlay.bannedNow', { time: formatWhen(verdict.allowedFrom, now) });
+  }
+  if (!verdict.leaveBy) return t('overlay.freeNowNoLimit');
+  return t('overlay.freeNowUntil', { time: formatWhen(verdict.leaveBy, now) });
+}
+
+/** Why the line has its colour: mapped from the signs, or the city's default rule. */
+function basisLines(info: OverlayInfo): string[] {
+  if (info.basis === 'osm') {
+    const lines = [t(info.kind === 'noParking' ? 'overlay.mappedNoDetail' : 'overlay.mappedFreeDetail')];
+    if (info.maxstay) lines.push(t('overlay.mappedMaxstay', { limit: String(info.maxstay) }));
+    return lines;
+  }
+  return [
+    t(info.city === 'Gatineau' ? 'overlay.gatineauDefaultDetail' : 'overlay.streetFreeDetail'),
+    t('overlay.defaultBasis'),
+  ];
+}
+
+function sourceKey(info: OverlayInfo): string {
+  if (info.basis === 'osm') return 'overlay.sourceOsm';
+  if (info.city === 'Gatineau') return 'overlay.sourceGatineau';
+  return 'overlay.source';
 }
 
 function describe(info: OverlayInfo): { title: string; lines: string[]; color: string } {
@@ -47,19 +85,19 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
     case 'street':
       return {
         title: t('overlay.streetFree', { road: prettyRoad(info.road) ?? '' }),
-        lines: [freeUntilLine(), t('overlay.streetFreeDetail')],
+        lines: [freeUntilLine(info), ...basisLines(info)],
         color: MAP_COLORS.streetFree,
       };
     case 'noParking':
       return {
         title: t('overlay.streetNo', { road: prettyRoad(info.road) ?? '' }),
-        lines: [t('overlay.streetNoDetail')],
+        lines: info.basis === 'osm' ? basisLines(info) : [t('overlay.streetNoDetail')],
         color: MAP_COLORS.streetNo,
       };
     case 'permit':
       return {
         title: t('overlay.permit', { area: (fr ? info.areaFr : info.area) ?? info.area ?? '' }),
-        lines: [freeUntilLine(), t('overlay.permitDetail')],
+        lines: [freeUntilLine(info), t('overlay.permitDetail')],
         color: MAP_COLORS.streetFree,
       };
     case 'free15':
@@ -95,27 +133,15 @@ interface Props {
   onParkHere?: (timerMinutes: number) => void;
 }
 
-/** How long a car parked now may stay on this kind of street, in minutes. */
-export function streetStayMinutes(info: OverlayInfo, now: Date = new Date()): number | null {
-  switch (info.kind) {
-    case 'street':
-    case 'permit':
-      return Math.max(1, Math.round((ottawaDefaultLeaveBy(now).getTime() - now.getTime()) / 60_000));
-    case 'free15':
-      return 15;
-    case 'paid': {
-      const hours = parseInt(String(info.maxStayHours ?? ''), 10);
-      return Number.isFinite(hours) && hours > 0 ? hours * 60 : null;
-    }
-    default:
-      return null;
-  }
-}
+export { streetStayMinutes };
 
 /** What a tapped city-layer line, area or lot means. */
 export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss, onParkHere }) => {
   const { title, lines, color } = describe(info);
-  const stayMinutes = onParkHere ? streetStayMinutes(info) : null;
+  // null = no time limit; 0 = can't park here right now
+  const stayMinutes = onParkHere && STREET_KINDS.has(info.kind) && info.kind !== 'noParking'
+    ? streetStayMinutes(info)
+    : 0;
   const [correcting, setCorrecting] = useState(false);
   const [sent, setSent] = useState<'idle' | 'sending' | 'done' | 'failed'>('idle');
   const canCorrect = STREET_KINDS.has(info.kind) && typeof info.tapLat === 'number';
@@ -149,21 +175,23 @@ export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss, onParkHere }
       </View>
       {lines.map(line => <Text key={line} style={styles.line}>{line}</Text>)}
 
-      {stayMinutes !== null && onParkHere && (
+      {stayMinutes !== 0 && onParkHere && (
         <TouchableOpacity
           style={[styles.parkBtn, { backgroundColor: color }]}
-          onPress={() => onParkHere(stayMinutes)}
+          onPress={() => onParkHere(stayMinutes ?? 0)}
           activeOpacity={0.85}
         >
           <Ionicons name="car" size={18} color="#111" />
           <Text style={styles.parkBtnText}>
-            {t('overlay.parkedHere', {
-              time: formatWhen(new Date(Date.now() + stayMinutes * 60_000)),
-            })}
+            {stayMinutes === null
+              ? t('overlay.parkedHereNoLimit')
+              : t('overlay.parkedHere', {
+                time: formatWhen(new Date(Date.now() + stayMinutes * 60_000)),
+              })}
           </Text>
         </TouchableOpacity>
       )}
-      <Text style={styles.source}>{t('overlay.source')}</Text>
+      <Text style={styles.source}>{t(sourceKey(info))}</Text>
 
       {canCorrect && sent === 'done' && (
         <Text style={styles.thanks}>{t('overlay.correctionThanks')}</Text>

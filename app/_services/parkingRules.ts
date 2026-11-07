@@ -244,3 +244,55 @@ export function findSpotsForStay(
     .sort((a, b) => Number(b.confirmed) - Number(a.confirmed) || a.distanceMeters - b.distanceMeters)
     .slice(0, limit);
 }
+
+// ─── Street lines ─────────────────────────────────────────────────────────────
+
+/** Properties carried by a street line in the dataset (see scripts/build-dataset.ts). */
+export interface StreetProps {
+  kind?: unknown;
+  city?: unknown;
+  /** Posted limit mapped in OpenStreetMap, e.g. "2 h" */
+  maxstay?: unknown;
+}
+
+/**
+ * The rule for a free street line right now: Ottawa's unsigned-street default
+ * (or the mapped limit), Gatineau's winter overnight ban. Paid and 15-minute
+ * lines have their own limits and are handled by the caller.
+ */
+export function streetVerdict(props: StreetProps, now: Date = new Date()): RuleVerdict {
+  const city = props.city === 'Gatineau' ? 'Gatineau' : 'Ottawa';
+  const maxstay = typeof props.maxstay === 'string' ? props.maxstay : null;
+  return evaluateSpot(
+    { type: 'street', city, timeRestrictions: maxstay, feeUnknown: false, seasonalBan: false },
+    now,
+  );
+}
+
+/**
+ * Minutes a car parked now may stay on this line: a number, `null` when no
+ * limit applies (Gatineau outside the winter ban), or 0 when parking is banned
+ * right now.
+ */
+export function streetStayMinutes(
+  props: StreetProps & { maxStayHours?: unknown },
+  now: Date = new Date(),
+): number | null {
+  switch (props.kind) {
+    case 'street':
+    case 'permit': {
+      const verdict = streetVerdict(props, now);
+      if (verdict.level === 'banned') return 0;
+      if (!verdict.leaveBy) return null;
+      return Math.max(1, Math.round((verdict.leaveBy.getTime() - now.getTime()) / 60_000));
+    }
+    case 'free15':
+      return 15;
+    case 'paid': {
+      const hours = parseInt(String(props.maxStayHours ?? ''), 10);
+      return Number.isFinite(hours) && hours > 0 ? hours * 60 : null;
+    }
+    default:
+      return 0;
+  }
+}

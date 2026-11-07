@@ -1,4 +1,5 @@
 import { Coordinate } from '../_types';
+import { streetVerdict } from './parkingRules';
 
 /** City data spells roads in capitals ("GLEBE AVE", "O'CONNOR ST"); show "Glebe Ave". */
 export function prettyRoad(name: unknown): string | null {
@@ -40,6 +41,7 @@ function lineParts(geometry: GeoJSON.Geometry): number[][][] {
 export function nearestFreeStreet(
   overlays: GeoJSON.FeatureCollection,
   from: Coordinate,
+  now: Date = new Date(),
 ): NearestStreet | null {
   const kx = 111_320 * Math.cos((from.latitude * Math.PI) / 180);
   const ky = 110_540;
@@ -51,6 +53,9 @@ export function nearestFreeStreet(
   for (const feature of overlays.features) {
     const kind = feature.properties?.kind as string | undefined;
     if (!kind || !FREE_KINDS.has(kind) || !feature.geometry) continue;
+    // Gatineau's overnight winter ban: free streets that are closed right now don't count
+    if (kind === 'street' && feature.properties?.city === 'Gatineau'
+      && streetVerdict(feature.properties, now).level === 'banned') continue;
     for (const line of lineParts(feature.geometry)) {
       if (!line.some(([lng, lat]) => Math.abs(lat - from.latitude) < dLat && Math.abs(lng - from.longitude) < dLng)) {
         continue;

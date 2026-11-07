@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { LocaleProvider } from './_contexts/LocaleContext';
+import { LanguagePicker } from './_components/LanguagePicker';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -25,6 +26,7 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
           </Stack>
+          <LanguagePicker />
         </LocaleProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -17,9 +17,11 @@ import { SpotBottomSheet } from '../_components/BottomSheet';
 import { TimerBar } from '../_components/TimerBar';
 import { AddSpotModal } from '../_components/AddSpotModal';
 import { LocationSearchBar } from '../_components/LocationSearchBar';
+import { LanguageToggle } from '../_components/LanguagePicker';
 import { SearchResultCard } from '../_components/SearchResultCard';
 import { StayFinder } from '../_components/StayFinder';
-import { OverlayInfoCard } from '../_components/OverlayInfoCard';
+import { OverlayInfoCard, streetUntilText } from '../_components/OverlayInfoCard';
+import { buildSpotRecord, buildStreetRecord } from '../_services/parkingRecord';
 import { WinterBanner } from '../_components/WinterBanner';
 import { DirectionsModal } from '../_components/DirectionsModal';
 import type { OverlayInfo } from '../_components/mapStyle';
@@ -37,7 +39,6 @@ import { t } from '../_i18n';
 import { detectCity, haversineMeters, nearestFreeSpots } from '../_services/overpass';
 import { nearestFreeStreet, NearestStreet, prettyRoad } from '../_services/nearestStreet';
 import { formatWhen } from '../_i18n/time';
-import { ottawaDefaultLeaveBy } from '../_services/parkingRules';
 import { GeocodingResult } from '../_services/geocoding';
 import { CityLot, fetchCityLots } from '../_services/cityLots';
 import { parkedCarCoordinate } from '../_services/parkedCar';
@@ -98,6 +99,7 @@ export default function MapScreen() {
     error: spotsError,
     reportCounts,
     now,
+    dataAsOf,
     refresh,
   } = useSpots({ ottawaBanLikely: !!winter.heavySnow });
   const { session, startParking, stopParking, loading: sessionLoading } = useSessionContext();
@@ -149,7 +151,7 @@ export default function MapScreen() {
     void remember({
       lat: session.lat,
       lng: session.lng,
-      label: `${session.spotType === 'street' ? t('spot.street') : session.spotType ?? 'Parking'} · ${session.spotCity ?? ''}`,
+      label: `${t(`spot.${session.spotType ?? 'street'}`)} · ${session.spotCity ?? ''}`,
       spotId: session.spotId,
     });
   }, [session, car?.spotId, remember]);
@@ -336,13 +338,20 @@ export default function MapScreen() {
   const handleParkHere = useCallback(
     async (timerMinutes?: number, warnMinutes = 10) => {
       if (!selectedSpot) return;
-      const spotLabel = `${selectedSpot.type} · ${selectedSpot.city}`;
+      const spotLabel = `${t(`spot.${selectedSpot.type}`)} · ${selectedSpot.city}`;
       await remember({
         lat: selectedSpot.lat,
         lng: selectedSpot.lng,
         label: spotLabel,
         spotId: selectedSpot.id,
       });
+      const rule = selectedSpot.rule;
+      const verdict = rule?.level === 'banned' && rule.allowedFrom
+        ? t('overlay.bannedUntil', { time: formatWhen(rule.allowedFrom) })
+        : rule?.leaveBy
+          ? t('overlay.untilTime', { time: formatWhen(rule.leaveBy) })
+          : selectedSpot.feeRequired ? t('map.legendStreetPaid') : t('overlay.noTimeLimit');
+      const record = buildSpotRecord(selectedSpot, verdict, { accuracyMeters: null, dataAsOf });
       try {
         await startParking(
           selectedSpot.id,
@@ -352,6 +361,7 @@ export default function MapScreen() {
           warnMinutes,
           selectedSpot.type,
           selectedSpot.city,
+          record,
         );
         if (timerMinutes && timerMinutes > 0) {
           startTimer(timerMinutes, warnMinutes);
@@ -362,7 +372,7 @@ export default function MapScreen() {
         Alert.alert(t('errors.sessionFailed'), t('errors.carSavedAnyway'));
       }
     },
-    [selectedSpot, startParking, startTimer, remember],
+    [selectedSpot, startParking, startTimer, remember, dataAsOf],
   );
 
   /**
@@ -382,13 +392,22 @@ export default function MapScreen() {
     const spotId = `street_${lat.toFixed(5)}_${lng.toFixed(5)}`;
     await remember({ lat, lng, label: `${road} · ${city}`, spotId });
     setOverlayInfo(null);
+    const verdict = info.kind === 'paid'
+      ? t('record.verdictPaid', { hours: String(info.maxStayHours ?? '?') })
+      : streetUntilText(info);
+    const record = buildStreetRecord({ ...info, city: info.city ?? city }, verdict, {
+      positionSource: nearTap ? 'gps' : 'map',
+      accuracyMeters: nearTap ? accuracyMeters ?? null : null,
+      dataAsOf,
+    });
     try {
-      await startParking(spotId, lat, lng, timerMinutes, 10, 'street', city);
-      startTimer(timerMinutes, 10);
+      // 0 = no time limit here (e.g. Gatineau outside the winter ban): no reminder
+      await startParking(spotId, lat, lng, timerMinutes > 0 ? timerMinutes : undefined, 10, 'street', city, record);
+      if (timerMinutes > 0) startTimer(timerMinutes, 10);
     } catch {
       Alert.alert(t('errors.sessionFailed'), t('errors.carSavedAnyway'));
     }
-  }, [hasFix, coordinate.latitude, coordinate.longitude, remember, startParking, startTimer]);
+  }, [hasFix, coordinate.latitude, coordinate.longitude, accuracyMeters, dataAsOf, remember, startParking, startTimer]);
 
   /** Fly to a street and open its card, as if the user had tapped the line. */
   const handleSelectStreet = useCallback((street: NearestStreet) => {
@@ -412,7 +431,7 @@ export default function MapScreen() {
     await remember({
       lat: selectedSpot.lat,
       lng: selectedSpot.lng,
-      label: `${selectedSpot.type} · ${selectedSpot.city}`,
+      label: `${t(`spot.${selectedSpot.type}`)} · ${selectedSpot.city}`,
       spotId: selectedSpot.id,
     });
     Alert.alert(t('car.saved'), t('car.savedHint'));
@@ -514,7 +533,12 @@ export default function MapScreen() {
       {/* ── Top overlay: app name, search, filters and cards, stacked ─────── */}
       <View style={[styles.topOverlay, { top: insets.top + 8 }]} pointerEvents="box-none">
         {/* Search bar */}
-        <LocationSearchBar onSelectResult={handleSearchSelect} />
+        <View style={styles.searchRow} pointerEvents="box-none">
+          <View style={styles.searchFlex}>
+            <LocationSearchBar onSelectResult={handleSearchSelect} />
+          </View>
+          <LanguageToggle />
+        </View>
 
         {/* Quick actions */}
         <View style={styles.chipRow} pointerEvents="box-none">
@@ -688,9 +712,7 @@ export default function MapScreen() {
                 distance: nearestStreet.distanceMeters < 1000
                   ? `${Math.max(10, Math.round(nearestStreet.distanceMeters / 10) * 10)} m`
                   : `${(nearestStreet.distanceMeters / 1000).toFixed(1)} km`,
-                time: nearestStreet.kind === 'free15'
-                  ? formatWhen(new Date(Date.now() + 15 * 60_000))
-                  : formatWhen(ottawaDefaultLeaveBy(new Date())),
+                until: streetUntilText({ ...nearestStreet.properties, kind: nearestStreet.kind }),
               })}
             </Text>
           </View>
@@ -799,6 +821,15 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   // ── Top overlay (app name + search bar) ────────────────────────────────────
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    zIndex: 10,
+  },
+  searchFlex: {
+    flex: 1,
+  },
   topOverlay: {
     position: 'absolute',
     left: 16,
