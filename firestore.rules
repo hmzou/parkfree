@@ -123,6 +123,49 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['userId', 'kind', 'road', 'lat', 'lng', 'shouldBe', 'createdAt']);
     }
 
+    // ── Ambassadors ──────────────────────────────────────────────────────────
+    // Only real accounts (not anonymous users) can post sign photos, so every
+    // report can be traced to a person and removed if it's wrong.
+    function hasAccount() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // Sign reports colour curbs on the map: public read, stamped with server
+    // time, never edited (a newer photo replaces an older one on the map).
+    match /signReports/{id} {
+      allow read: if true;
+      allow create: if hasAccount()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasOnly(['userId', 'lat', 'lng', 'accuracyMeters', 'headingDeg',
+             'side', 'sideMethod', 'road', 'city', 'rule', 'hours', 'note', 'stretch', 'photoId', 'createdAt'])
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number
+        && request.resource.data.side in ['left', 'right']
+        && request.resource.data.rule in ['free', 'timeLimit', 'paid', 'permit', 'noParking', 'noStopping']
+        && (request.resource.data.hours == null
+            || (request.resource.data.hours is number && request.resource.data.hours > 0 && request.resource.data.hours <= 24))
+        && request.resource.data.note is string && request.resource.data.note.size() <= 120
+        && request.resource.data.stretch is list
+        && request.resource.data.stretch.size() >= 2 && request.resource.data.stretch.size() <= 60
+        && request.resource.data.photoId is string;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // The sign photo itself: only the ambassador can read it (reviewers use
+    // the console). Kept under 900 KB of base64 so it fits in one document.
+    match /signPhotos/{id} {
+      allow read, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if hasAccount()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasOnly(['userId', 'image', 'createdAt'])
+        && request.resource.data.image is string
+        && request.resource.data.image.size() < 900000;
+      allow update: if false;
+    }
+
     // Crowd reports — public read so pin colors can update. One doc per
     // user per spot, stamped with server time, so reports cannot be stacked
     // or backdated to stay in the 2-hour window.

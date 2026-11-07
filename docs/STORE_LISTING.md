@@ -63,20 +63,27 @@ Sans compte, sans publicité. Données de la Ville d'Ottawa et d'OpenStreetMap. 
 |---|---|
 | Collects or shares user data? | Collects: yes. Shares: no |
 | Encrypted in transit? | Yes |
-| Users can request deletion? | Yes, by email |
-| Location → Precise location | Collected; required for app functionality; not shared |
-| App activity → Other user-generated content | Collected (reports, corrections); app functionality; optional |
-| Device or other IDs | Collected (Firebase anonymous ID); app functionality |
+| Users can request deletion? | Yes, in the app (Profile → Account → Delete account) and at `delete-account.html` |
+| Account creation | Optional. Email and password, Google; Microsoft and Apple once configured |
+| Delete account URL | `https://hmzou.github.io/parkfree/delete-account.html` |
+| Location → Precise location | Collected; app functionality; not shared |
+| Personal info → Name, Email address | Collected if you make an account; account management; optional |
+| Personal info → User IDs | Collected (Firebase user ID); app functionality |
+| Photos | Collected (ambassador sign photos); app functionality; optional |
+| App activity → Other user-generated content | Collected (reports, corrections, sign reports); app functionality; optional |
 | Used for ads or tracking? | No |
 
-Content rating questionnaire: Utility/Navigation, no violence, no user-to-user communication, no purchases. Target audience: 18+.
+Content rating questionnaire: Utility/Navigation, no violence, no purchases. User-generated content: sign photos are reviewed and are not shown to other users; the map only shows the rule. Target audience: 18+.
 
 ## Apple — App Privacy ("nutrition label")
 
-- Precise Location: App Functionality. Linked to user: No. Tracking: No. (Includes GPS accuracy saved in the parking record.)
-- User Content (other): App Functionality. Not linked, no tracking.
-- Identifiers (User ID): App Functionality. Not linked, no tracking.
+- Precise Location: App Functionality. Linked to user: Yes if signed in. Tracking: No.
+- Contact Info (Name, Email): App Functionality. Linked to user. No tracking.
+- Photos: App Functionality (sign photos). Linked to user. No tracking.
+- User Content (other): App Functionality. Linked to user if signed in. No tracking.
+- Identifiers (User ID): App Functionality. Linked. No tracking.
 - Data used to track you: none.
+- Sign in with Apple is required by App Review if Google or Microsoft sign-in is offered on iOS.
 
 ## Screenshots needed
 
@@ -92,4 +99,5 @@ Suggested shots: (1) the coloured street map, (2) a street card with "Free now �
 3. **Expo:** Done: logged in as `hamzatheapp`; project `@hamzatheapp/parkfree`. The `.env` values are already EAS environment variables.
 4. **Mapbox:** create a secret token with the `DOWNLOADS:READ` scope and save it as the EAS secret `MAPBOX_SECRET_TOKEN` (native builds can't download the Mapbox SDK without it).
 5. **EAS environment:** done for the `.env` values. Update them with `eas env:create --force` if a key changes.
-6. **Firestore rules:** deploy the session rules before release (`npx firebase-tools deploy --only firestore:rules`). They make the parking record tamper-evident: the server sets the parked and left times, and the location and rule can't be edited afterwards. The record's wording promises this.
+6. **Sign-in methods:** follow `docs/ACCOUNTS.md` (turn on email/password and Google in Firebase; Microsoft needs an Azure app; Apple needs the Apple Developer membership).
+7. **Firestore rules:** deploy the session rules before release (`npx firebase-tools deploy --only firestore:rules`). They make the parking record tamper-evident: the server sets the parked and left times, and the location and rule can't be edited afterwards. The record's wording promises this.

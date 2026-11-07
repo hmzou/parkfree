@@ -22,6 +22,10 @@ export const MAP_COLORS = {
   streetFreeDefault: '#0E6B3B',
   streetNo: '#FF1744',
   streetPaid: '#2979FF',
+  /** Roads nobody has checked yet: the signs decide */
+  streetUnknown: '#B0BEC5',
+  /** Someone is parked here right now */
+  taken: '#FF9100',
 } as const;
 
 export const OVERLAY_MIN_ZOOM = 13;
@@ -37,7 +41,12 @@ export const LINE_WIDTH = [
  * drawn solid; streets coloured only by the city's default rule are fainter,
  * so a glance shows which answers are certain.
  */
-export const LINE_OPACITY = ['case', ['==', ['get', 'basis'], 'default'], 0.45, 0.95] as const;
+export const LINE_OPACITY = [
+  'case',
+  ['==', ['get', 'kind'], 'unknown'], 0.6,
+  ['==', ['get', 'basis'], 'default'], 0.45,
+  0.95,
+] as const;
 /** Paid segments sit on their recorded curb (`curb` = ±1), beside the street centreline */
 const CURB = ['coalesce', ['get', 'curb'], 0];
 export const LINE_OFFSET = [
@@ -61,7 +70,7 @@ interface PinStyle {
  */
 export function getPinStyle(spot: ParkingSpot, reportCount: number): PinStyle {
   const solid = (fill: string): PinStyle => ({ fill, stroke: '#fff' });
-  if (spot.occupied) return solid(MAP_COLORS.streetNo);
+  if (spot.occupied) return solid(MAP_COLORS.taken);
   if (spot.rule?.level === 'banned') return solid(MAP_COLORS.streetNo);
   if (reportCount >= 2) return solid(MAP_COLORS.streetNo);
   if (spot.feeRequired) return solid(MAP_COLORS.streetPaid);
@@ -104,9 +113,12 @@ const OVERLAY_COLORS: Record<string, string> = {
   noParking: MAP_COLORS.streetNo,
   banAlternate: MAP_COLORS.banAlternate,
   cityLot: MAP_COLORS.cityLot,
+  unknown: MAP_COLORS.streetUnknown,
 };
 
-const OVERLAY_SORT: Record<string, number> = { street: 0, permit: 1, free15: 2, paid: 3, noParking: 4 };
+const OVERLAY_SORT: Record<string, number> = { unknown: -1, street: 0, permit: 1, free15: 2, paid: 3, noParking: 4 };
+/** A sign photo is the freshest answer, so it draws over everything */
+const AMBASSADOR_SORT_BOOST = 10;
 
 /** City layers plus live city lots, each feature tagged with its colour. */
 export function buildOverlayGeoJSON(
@@ -124,7 +136,8 @@ export function buildOverlayGeoJSON(
       properties: {
         ...feature.properties,
         color: OVERLAY_COLORS[kind] ?? '#fff',
-        sortKey: OVERLAY_SORT[kind] ?? 0,
+        sortKey: (OVERLAY_SORT[kind] ?? 0)
+          + (feature.properties?.basis === 'ambassador' ? AMBASSADOR_SORT_BOOST : 0),
       },
     });
   });
@@ -147,6 +160,21 @@ export function buildOverlayGeoJSON(
   return { type: 'FeatureCollection', features };
 }
 
+/** Orange dots where someone is parked on a street line right now. */
+export function buildTakenGeoJSON(
+  taken: Array<{ id: string; lat: number; lng: number }>,
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: 'FeatureCollection',
+    features: taken.map(spot => ({
+      type: 'Feature' as const,
+      id: spot.id,
+      geometry: { type: 'Point' as const, coordinates: [spot.lng, spot.lat] },
+      properties: { id: spot.id },
+    })),
+  };
+}
+
 export type OverlayInfo = Record<string, string | number | null | undefined> & { kind: string };
 
 export interface LegendItem {
@@ -162,6 +190,8 @@ export function legendItems(showOverlays: boolean, showWinterParking: boolean): 
     { color: MAP_COLORS.streetFreeDefault, key: 'map.legendStreetDefault', shape: 'line' },
     { color: MAP_COLORS.streetNo, key: 'map.legendStreetNo', shape: 'line' },
     { color: MAP_COLORS.streetPaid, key: 'map.legendStreetPaid', shape: 'line' },
+    { color: MAP_COLORS.streetUnknown, key: 'map.legendStreetUnknown', shape: 'line' },
+    { color: MAP_COLORS.taken, key: 'map.legendTaken', shape: 'dot' },
     { color: MAP_COLORS.streetFree, key: 'map.legendUnclear', shape: 'ring' },
   ];
   if (showOverlays) {

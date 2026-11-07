@@ -6,9 +6,12 @@ import Constants from 'expo-constants';
 import { ParkingSpot, Coordinate } from '../_types';
 import type { CityLot } from '../_services/cityLots';
 import { MapLegend } from './MapLegend';
+import type { TakenSpot } from '../_hooks/useSpots';
 import {
   buildOverlayGeoJSON,
   buildSpotsGeoJSON,
+  buildTakenGeoJSON,
+  MAP_COLORS,
   LINE_OPACITY,
   LINE_WIDTH,
   LINE_SORT_KEY,
@@ -48,6 +51,9 @@ interface Props {
   cityLots: CityLot[];
   /** Show winter-ban alternate parking (only useful in winter) */
   showWinterParking: boolean;
+  /** Street spots someone is parked in, drawn orange */
+  takenSpots: TakenSpot[];
+  showTaken: boolean;
   onSpotPress: (spot: ParkingSpot) => void;
   onOverlayPress: (info: OverlayInfo) => void;
   onMapMoved: (coord: Coordinate) => void;
@@ -67,6 +73,8 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   overlays,
   cityLots,
   showWinterParking,
+  takenSpots,
+  showTaken,
   onSpotPress,
   onOverlayPress,
   onMapMoved,
@@ -109,6 +117,20 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
     () => buildOverlayGeoJSON(overlays, cityLots, showWinterParking),
     [overlays, cityLots, showWinterParking],
   );
+
+  const takenGeoJSON = useMemo(() => buildTakenGeoJSON(takenSpots), [takenSpots]);
+
+  const handleTakenPress = useCallback((event: { features?: GeoJSON.Feature[] }) => {
+    const id = event.features?.[0]?.properties?.id as string | undefined;
+    const spot = takenSpots.find(item => item.id === id);
+    if (!spot) return;
+    onOverlayPress({
+      kind: 'taken',
+      until: spot.until ? spot.until.toISOString() : null,
+      tapLat: spot.lat,
+      tapLng: spot.lng,
+    });
+  }, [takenSpots, onOverlayPress]);
 
   // Point opacity: 0.5 for cached, 1.0 for fresh
   const pointOpacity = isCached ? 0.5 : 1.0;
@@ -233,7 +255,7 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
             <MapboxGL.LineLayer
               id="overlay-line"
               minZoomLevel={OVERLAY_MIN_ZOOM}
-              filter={['==', ['geometry-type'], 'LineString']}
+              filter={['in', ['geometry-type'], ['literal', ['LineString', 'MultiLineString']]]}
               style={{
                 lineColor: ['get', 'color'],
                 lineWidth: LINE_WIDTH,
@@ -263,6 +285,27 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
                 textOffset: [0, 1.6],
                 textHaloColor: '#000',
                 textHaloWidth: 1,
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        )}
+
+        {/* Taken: someone is parked on this street spot right now */}
+        {showTaken && takenSpots.length > 0 && (
+          <MapboxGL.ShapeSource
+            id="taken-source"
+            shape={takenGeoJSON}
+            onPress={handleTakenPress}
+            hitbox={{ width: 24, height: 24 }}
+          >
+            <MapboxGL.CircleLayer
+              id="taken-dot"
+              minZoomLevel={OVERLAY_MIN_ZOOM}
+              style={{
+                circleColor: MAP_COLORS.taken,
+                circleRadius: ['interpolate', ['linear'], ['zoom'], 13, 4, 17, 8],
+                circleStrokeColor: '#fff',
+                circleStrokeWidth: 2,
               }}
             />
           </MapboxGL.ShapeSource>

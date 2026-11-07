@@ -9,6 +9,8 @@ import { MAP_COLORS, OverlayInfo } from './mapStyle';
 import { ensureAnonymousAuth, submitMapCorrection, StreetColor } from '../_services/firebase';
 
 const STREET_KINDS = new Set(['street', 'noParking', 'paid', 'permit', 'free15']);
+/** Lines an ambassador can photograph the sign for */
+const PHOTO_KINDS = new Set([...STREET_KINDS, 'unknown']);
 const CORRECTIONS: { color: StreetColor; key: string; swatch: string }[] = [
   { color: 'free', key: 'map.legendStreetFree', swatch: MAP_COLORS.streetFree },
   { color: 'noParking', key: 'map.legendStreetNo', swatch: MAP_COLORS.streetNo },
@@ -41,6 +43,15 @@ function freeUntilLine(info: OverlayInfo, now: Date = new Date()): string {
 
 /** Why the line has its colour: mapped from the signs, or the city's default rule. */
 function basisLines(info: OverlayInfo): string[] {
+  if (info.basis === 'ambassador') {
+    const lines: string[] = [];
+    if (info.maxstay) lines.push(t('overlay.mappedMaxstay', { limit: String(info.maxstay) }));
+    if (info.signNote) lines.push(t('overlay.signSays', { note: String(info.signNote) }));
+    lines.push(info.reportedAt
+      ? t('overlay.ambassadorDetailWhen', { date: new Date(String(info.reportedAt)).toLocaleDateString(t('common.dateLocale'), { month: 'long', day: 'numeric', year: 'numeric' }) })
+      : t('overlay.ambassadorDetail'));
+    return lines;
+  }
   if (info.basis === 'osm') {
     const lines = [t(info.kind === 'noParking' ? 'overlay.mappedNoDetail' : 'overlay.mappedFreeDetail')];
     if (info.maxstay) lines.push(t('overlay.mappedMaxstay', { limit: String(info.maxstay) }));
@@ -53,6 +64,8 @@ function basisLines(info: OverlayInfo): string[] {
 }
 
 function sourceKey(info: OverlayInfo): string {
+  if (info.basis === 'ambassador') return 'overlay.sourceAmbassador';
+  if (info.kind === 'taken') return 'overlay.sourceTaken';
   if (info.basis === 'osm') return 'overlay.sourceOsm';
   if (info.city === 'Gatineau') return 'overlay.sourceGatineau';
   return 'overlay.source';
@@ -62,6 +75,14 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
   const fr = getLocale() === 'fr';
   switch (info.kind) {
     case 'paid': {
+      if (info.basis === 'ambassador') {
+        const lines = info.maxStayHours ? [t('overlay.maxStay', { hours: Number(info.maxStayHours) })] : [];
+        return {
+          title: prettyRoad(info.road) ? `${t('overlay.paid')} · ${prettyRoad(info.road)}` : t('overlay.paid'),
+          lines: [...lines, ...basisLines(info)],
+          color: MAP_COLORS.streetPaid,
+        };
+      }
       const lines: string[] = [];
       // Verdict first, like SpotAngels: does today need a meter at all?
       const days = Number(info.daysInEffect);
@@ -91,15 +112,38 @@ function describe(info: OverlayInfo): { title: string; lines: string[]; color: s
     case 'noParking':
       return {
         title: t('overlay.streetNo', { road: prettyRoad(info.road) ?? '' }),
-        lines: info.basis === 'osm' ? basisLines(info) : [t('overlay.streetNoDetail')],
+        lines: info.basis === 'osm' || info.basis === 'ambassador' ? basisLines(info) : [t('overlay.streetNoDetail')],
         color: MAP_COLORS.streetNo,
       };
     case 'permit':
+      if (info.basis === 'ambassador') {
+        return {
+          title: t('overlay.permitStreet', { road: prettyRoad(info.road) ?? '' }),
+          lines: [t('overlay.permitDetail'), ...basisLines(info)],
+          color: MAP_COLORS.streetFree,
+        };
+      }
       return {
         title: t('overlay.permit', { area: (fr ? info.areaFr : info.area) ?? info.area ?? '' }),
         lines: [freeUntilLine(info), t('overlay.permitDetail')],
         color: MAP_COLORS.streetFree,
       };
+    case 'unknown':
+      return {
+        title: t('overlay.unknown', { road: prettyRoad(info.road) ?? '' }),
+        lines: [t('overlay.unknownDetail'), t('overlay.unknownHelp')],
+        color: MAP_COLORS.streetUnknown,
+      };
+    case 'taken': {
+      const until = info.until ? new Date(String(info.until)) : null;
+      return {
+        title: t('overlay.taken'),
+        lines: [until && until.getTime() > Date.now()
+          ? t('overlay.takenUntil', { time: formatWhen(until) })
+          : t('overlay.takenDetail')],
+        color: MAP_COLORS.taken,
+      };
+    }
     case 'free15':
       return { title: t('overlay.free15'), lines: [], color: MAP_COLORS.streetFree };
     case 'banAlternate':
@@ -131,12 +175,14 @@ interface Props {
   onDismiss: () => void;
   /** Start a parking session on this street with a reminder before the limit */
   onParkHere?: (timerMinutes: number) => void;
+  /** Open the ambassador camera to photograph this street's sign */
+  onPhotoSign?: () => void;
 }
 
 export { streetStayMinutes };
 
 /** What a tapped city-layer line, area or lot means. */
-export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss, onParkHere }) => {
+export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss, onParkHere, onPhotoSign }) => {
   const { title, lines, color } = describe(info);
   // null = no time limit; 0 = can't park here right now
   const stayMinutes = onParkHere && STREET_KINDS.has(info.kind) && info.kind !== 'noParking'
@@ -144,7 +190,8 @@ export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss, onParkHere }
     : 0;
   const [correcting, setCorrecting] = useState(false);
   const [sent, setSent] = useState<'idle' | 'sending' | 'done' | 'failed'>('idle');
-  const canCorrect = STREET_KINDS.has(info.kind) && typeof info.tapLat === 'number';
+  const canCorrect = PHOTO_KINDS.has(info.kind) && typeof info.tapLat === 'number';
+  const canPhoto = !!onPhotoSign && PHOTO_KINDS.has(info.kind);
 
   const sendCorrection = async (shouldBe: StreetColor) => {
     setSent('sending');
@@ -188,6 +235,18 @@ export const OverlayInfoCard: React.FC<Props> = ({ info, onDismiss, onParkHere }
               : t('overlay.parkedHere', {
                 time: formatWhen(new Date(Date.now() + stayMinutes * 60_000)),
               })}
+          </Text>
+        </TouchableOpacity>
+      )}
+      {canPhoto && (
+        <TouchableOpacity
+          style={[styles.photoBtn, info.kind === 'unknown' && styles.photoBtnStrong]}
+          onPress={onPhotoSign}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="camera" size={16} color={info.kind === 'unknown' ? '#111' : '#fff'} />
+          <Text style={[styles.photoBtnText, info.kind === 'unknown' && { color: '#111' }]}>
+            {t('ambassador.photoSign')}
           </Text>
         </TouchableOpacity>
       )}
@@ -269,6 +328,26 @@ const styles = StyleSheet.create({
     color: '#111',
     fontWeight: '700',
     fontSize: 15,
+  },
+  photoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  photoBtnStrong: {
+    backgroundColor: '#00E676',
+    borderColor: '#00E676',
+  },
+  photoBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
   },
   correctLink: {
     color: '#00C853',

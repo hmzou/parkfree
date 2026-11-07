@@ -8,7 +8,7 @@ import { City, ParkingSpot, SpotType } from '../_types';
  */
 
 /** `street`: unsigned public street, free by default; `noParking`: freeways, ramps, transit roads */
-export type OverlayKind = 'paid' | 'permit' | 'free15' | 'banAlternate' | 'street' | 'noParking';
+export type OverlayKind = 'paid' | 'permit' | 'free15' | 'banAlternate' | 'street' | 'noParking' | 'unknown';
 
 export interface DatasetSpot {
   id: string;

@@ -1,5 +1,17 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
+// Sign-in providers turn on when their settings exist (see docs/ACCOUNTS.md)
+const GOOGLE_WEB_CLIENT_ID = process.env.GOOGLE_WEB_CLIENT_ID ?? '';
+const GOOGLE_IOS_CLIENT_ID = process.env.GOOGLE_IOS_CLIENT_ID ?? '';
+const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID ?? '';
+const APPLE_SIGN_IN = process.env.APPLE_SIGN_IN === '1';
+
+/** com.googleusercontent.apps.<id> — the reversed iOS client id Google sign-in redirects to */
+function googleIosUrlScheme(): string | null {
+  if (!GOOGLE_IOS_CLIENT_ID) return null;
+  return `com.googleusercontent.apps.${GOOGLE_IOS_CLIENT_ID.replace('.apps.googleusercontent.com', '')}`;
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'ParkFree',
@@ -18,7 +30,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: 'com.parkfree.app',
+    usesAppleSignIn: APPLE_SIGN_IN,
     infoPlist: {
+      NSCameraUsageDescription:
+        'ParkFree uses the camera when you photograph a parking sign as an ambassador.',
       NSLocationWhenInUseUsageDescription:
         'ParkFree needs your location to find free parking near you.',
       NSLocationAlwaysAndWhenInUseUsageDescription:
@@ -35,6 +50,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     permissions: [
       'ACCESS_FINE_LOCATION',
       'ACCESS_COARSE_LOCATION',
+      'CAMERA',
       'RECEIVE_BOOT_COMPLETED',
       'VIBRATE',
     ],
@@ -69,6 +85,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     [
+      'expo-image-picker',
+      {
+        cameraPermission: 'ParkFree uses the camera when you photograph a parking sign as an ambassador.',
+        photosPermission: false,
+        microphonePermission: false,
+      },
+    ],
+    'expo-apple-authentication',
+    ...(googleIosUrlScheme()
+      ? [['@react-native-google-signin/google-signin', { iosUrlScheme: googleIosUrlScheme() }] as [string, object]]
+      : GOOGLE_WEB_CLIENT_ID ? ['@react-native-google-signin/google-signin'] : []),
+    [
       '@rnmapbox/maps',
       {
         RNMapboxMapsDownloadToken: process.env.MAPBOX_SECRET_TOKEN ?? '',
@@ -83,6 +111,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     firebaseStorageBucket: process.env.FIREBASE_STORAGE_BUCKET,
     firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
     firebaseAppId: process.env.FIREBASE_APP_ID,
+    googleWebClientId: GOOGLE_WEB_CLIENT_ID,
+    googleIosClientId: GOOGLE_IOS_CLIENT_ID,
+    microsoftClientId: MICROSOFT_CLIENT_ID,
+    appleSignIn: APPLE_SIGN_IN,
     eas: {
       projectId: process.env.EAS_PROJECT_ID || '0e214edd-8d58-4527-ab7f-88c64f2319e8',
     },

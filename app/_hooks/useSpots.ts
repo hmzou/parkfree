@@ -3,6 +3,7 @@ import { ParkingSpot, Coordinate } from '../_types';
 import { fetchFreeParkingSpots, haversineMeters } from '../_services/overpass';
 import { subscribeToSpots, subscribeToUserSpots, subscribeToRecentReports } from '../_services/firebase';
 import { isOccupiedNow } from '../_services/occupancy';
+import { SignReport, signReportFeatures, subscribeToSignReports } from '../_services/ambassador';
 import { evaluateSpot, RuleContext, RuleVerdict } from '../_services/parkingRules';
 import {
   datasetToSpots,
@@ -74,10 +75,39 @@ interface RefreshOptions {
   radiusMeters?: number;
 }
 
+/** A spot on a street line someone is parked in right now (drawn orange). */
+export interface TakenSpot {
+  id: string;
+  lat: number;
+  lng: number;
+  until: Date | null;
+  userId: string | null;
+}
+
+/** Street sessions use ids like street_45.41234_-75.69876, so the id is the position. */
+export function takenStreetSpots(remote: ParkingSpot[], now: Date): TakenSpot[] {
+  const out: TakenSpot[] = [];
+  for (const spot of remote) {
+    const match = /^street_(-?\d+\.\d+)_(-?\d+\.\d+)$/.exec(spot.id);
+    if (!match || !isOccupiedNow(spot, now)) continue;
+    out.push({
+      id: spot.id,
+      lat: Number(match[1]),
+      lng: Number(match[2]),
+      until: spot.occupiedUntil ?? null,
+      userId: spot.occupiedBy ?? null,
+    });
+  }
+  return out;
+}
+
 interface UseSpotsResult {
   spots: ParkingSpot[];
-  /** City of Ottawa parking layers from the dataset */
+  /** City layers from the dataset plus curbs coloured from ambassadors' sign photos */
   overlays: GeoJSON.FeatureCollection;
+  /** Street spots someone is parked in right now */
+  takenSpots: TakenSpot[];
+  signReports: SignReport[];
   /** The bundled dataset already holds every spot in the region, no area search needed */
   coversRegion: boolean;
   loading: boolean;
@@ -96,6 +126,7 @@ export function useSpots(ruleContext: RuleContext = {}): UseSpotsResult {
   const [firestoreSpots, setFirestoreSpots] = useState<ParkingSpot[]>([]);
   const [userSpots, setUserSpots] = useState<ParkingSpot[]>([]);
   const [reportCounts, setReportCounts] = useState<Record<string, number>>({});
+  const [signReports, setSignReports] = useState<SignReport[]>([]);
   const [loading, setLoading] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -183,11 +214,13 @@ export function useSpots(ruleContext: RuleContext = {}): UseSpotsResult {
     );
     const unsubUser = subscribeToUserSpots((updated) => setUserSpots(updated));
     const unsubReports = subscribeToRecentReports((counts) => setReportCounts(counts));
+    const unsubSigns = subscribeToSignReports(setSignReports);
 
     return () => {
       unsubSpots();
       unsubUser();
       unsubReports();
+      unsubSigns();
     };
   }, []);
 
@@ -280,9 +313,22 @@ export function useSpots(ruleContext: RuleContext = {}): UseSpotsResult {
     }
   }, []);
 
+  const overlays = useMemo((): GeoJSON.FeatureCollection => {
+    if (signReports.length === 0) return dataset.overlays;
+    // Ambassador curbs go last so they draw over the city's default guess
+    return {
+      type: 'FeatureCollection',
+      features: [...dataset.overlays.features, ...signReportFeatures(signReports)],
+    };
+  }, [dataset, signReports]);
+
+  const takenSpots = useMemo(() => takenStreetSpots(firestoreSpots, now), [firestoreSpots, now]);
+
   return {
     spots,
-    overlays: dataset.overlays,
+    overlays,
+    takenSpots,
+    signReports,
     coversRegion,
     loading,
     isCached,
