@@ -72,6 +72,7 @@ export default function MapScreen() {
     coordinate,
     permissionStatus,
     loading: locationLoading,
+    locating,
     hasFix,
     accuracyMeters,
     requestPermission,
@@ -627,7 +628,7 @@ export default function MapScreen() {
         {/* Permission granted but no position: the OS or browser is still
             blocking location. Say so instead of pretending you're downtown. */}
         {permissionStatus === 'granted' && !hasFix && !locationLoading && (
-          <TouchableOpacity style={styles.offlineBanner} onPress={handleLocateMe} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.offlineBanner} onPress={handleLocateMe} disabled={locating} activeOpacity={0.85}>
             <Ionicons name="warning-outline" size={14} color="#FFB300" />
             <Text style={[styles.offlineBannerText, { flex: 1 }]} numberOfLines={2}>
               {t(Platform.OS === 'web' ? 'map.noFixWeb' : 'map.noFix')}
@@ -756,10 +757,13 @@ export default function MapScreen() {
       <TouchableOpacity
         style={[styles.locateBtn, { bottom: insets.bottom + (session ? 110 : 90) }]}
         onPress={handleLocateMe}
+        disabled={locating}
         activeOpacity={0.85}
         accessibilityLabel={t('map.locateMe')}
       >
-        <Ionicons name={hasFix ? 'locate' : 'locate-outline'} size={22} color={hasFix ? '#2196F3' : '#AAA'} />
+        {locating
+          ? <ActivityIndicator size="small" color="#2196F3" />
+          : <Ionicons name={hasFix ? 'locate' : 'locate-outline'} size={22} color={hasFix ? '#2196F3' : '#AAA'} />}
       </TouchableOpacity>
 
       {/* FAB — Add Spot (hidden during active session) */}
