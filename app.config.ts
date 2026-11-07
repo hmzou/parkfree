@@ -4,7 +4,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'ParkFree',
   slug: 'parkfree',
-  owner: 'hmzou',
+  owner: 'hamzatheapp',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
@@ -84,7 +84,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
     firebaseAppId: process.env.FIREBASE_APP_ID,
     eas: {
-      projectId: process.env.EAS_PROJECT_ID ?? '8af329eb-81c4-4d1d-a201-8b87727f1d5c',
+      projectId: process.env.EAS_PROJECT_ID || '0e214edd-8d58-4527-ab7f-88c64f2319e8',
     },
   },
   scheme: 'parkfree',
