@@ -14,9 +14,9 @@ Everything the App Store and Google Play ask for, ready to paste.
 
 ## Full description — English
 
-Stop circling the block. ParkFree colours every street in Ottawa so you know where you can park at a glance:
+Stop circling the block. ParkFree colours the streets of Ottawa and Gatineau so you know where you can park at a glance:
 
-• Green — free parking. Unsigned Ottawa streets are free for 3 hours on weekdays (7 am–7 pm) and 6 hours on weekends.
+• Green — free parking. Solid green curbs are mapped from the actual signs; lighter green streets follow the city's default rule (Ottawa: 3 hours on weekdays 7 am–7 pm, 6 hours on weekends; Gatineau: no time limit, winter overnight ban).
 • Blue — paid parking, drawn on the right side of the street, with the hourly rate and maximum stay.
 • Red — no parking: highways, ramps and transit roads.
 
@@ -26,13 +26,17 @@ Parked? Tap "I parked here". ParkFree saves where your car is, starts a timer an
 
 Search any address to see the closest free street to where you're going. Spotted a mistake? Tap "Wrong colour?" and tell us.
 
+Got a ticket you think is wrong? Every parking session keeps a parking record — when and where you parked, the rule the map showed and where it came from, with times set by our server — that you can share when you contest it.
+
+In English and French.
+
 No account, no ads. Data from the City of Ottawa and OpenStreetMap. Always follow posted signs.
 
 ## Description complète — Français
 
-Arrêtez de tourner en rond. ParkFree colore chaque rue d'Ottawa pour que vous sachiez d'un coup d'œil où stationner :
+Arrêtez de tourner en rond. ParkFree colore les rues d'Ottawa et de Gatineau pour que vous sachiez d'un coup d'œil où stationner :
 
-• Vert — gratuit. Les rues d'Ottawa sans panneau sont gratuites 3 heures en semaine (7 h–19 h) et 6 heures la fin de semaine.
+• Vert — gratuit. Le vert foncé suit les panneaux relevés sur place; le vert pâle suit la règle par défaut de la ville (Ottawa : 3 heures en semaine de 7 h à 19 h, 6 heures la fin de semaine; Gatineau : sans limite de temps, interdiction hivernale de nuit).
 • Bleu — payant, du bon côté de la rue, avec le tarif et la durée maximale.
 • Rouge — interdit : autoroutes, bretelles et voies de transport en commun.
 
@@ -41,6 +45,10 @@ Arrêtez de tourner en rond. ParkFree colore chaque rue d'Ottawa pour que vous s
 Stationné? Touchez « Je suis stationné ici ». ParkFree enregistre l'emplacement de votre voiture, lance une minuterie et vous prévient avant l'heure limite pour éviter la contravention. L'hiver, l'application vous avertit des interdictions probables et affiche les stationnements municipaux gratuits.
 
 Cherchez une adresse pour trouver la rue gratuite la plus proche de votre destination. Une erreur? Touchez « Mauvaise couleur? ».
+
+Une contravention injustifiée? Chaque session garde une preuve de stationnement — quand et où vous étiez stationné, la règle affichée et sa provenance, avec l'heure fixée par notre serveur — à partager pour la contester.
+
+En français et en anglais.
 
 Sans compte, sans publicité. Données de la Ville d'Ottawa et d'OpenStreetMap. Respectez toujours la signalisation.
 
@@ -65,7 +73,7 @@ Content rating questionnaire: Utility/Navigation, no violence, no user-to-user c
 
 ## Apple — App Privacy ("nutrition label")
 
-- Precise Location: App Functionality. Linked to user: No. Tracking: No.
+- Precise Location: App Functionality. Linked to user: No. Tracking: No. (Includes GPS accuracy saved in the parking record.)
 - User Content (other): App Functionality. Not linked, no tracking.
 - Identifiers (User ID): App Functionality. Not linked, no tracking.
 - Data used to track you: none.
@@ -84,3 +92,4 @@ Suggested shots: (1) the coloured street map, (2) a street card with "Free now �
 3. **Expo:** Done: logged in as `hamzatheapp`; project `@hamzatheapp/parkfree`. The `.env` values are already EAS environment variables.
 4. **Mapbox:** create a secret token with the `DOWNLOADS:READ` scope and save it as the EAS secret `MAPBOX_SECRET_TOKEN` (native builds can't download the Mapbox SDK without it).
 5. **EAS environment:** done for the `.env` values. Update them with `eas env:create --force` if a key changes.
+6. **Firestore rules:** deploy the session rules before release (`npx firebase-tools deploy --only firestore:rules`). They make the parking record tamper-evident: the server sets the parked and left times, and the location and rule can't be edited afterwards. The record's wording promises this.

@@ -14,6 +14,7 @@ import { useLocale } from '../_contexts/LocaleContext';
 import { getSessionHistory } from '../_services/firebase';
 import { ParkingSession } from '../_types';
 import { t, getLocale } from '../_i18n';
+import { ParkingRecordModal } from '../_components/ParkingRecordModal';
 
 function formatDate(date: Date): string {
   return date.toLocaleDateString(getLocale() === 'fr' ? 'fr-CA' : 'en-CA', {
@@ -52,6 +53,7 @@ export default function HistoryScreen() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [recordFor, setRecordFor] = useState<ParkingSession | null>(null);
 
   const loadHistory = useCallback(async () => {
     if (!userId) return;
@@ -112,10 +114,19 @@ export default function HistoryScreen() {
       )}
 
       {!loading && sessions.map(session => (
-        <View key={session.id} style={styles.card}>
+        <TouchableOpacity
+          key={session.id}
+          style={styles.card}
+          activeOpacity={0.8}
+          onPress={() => setRecordFor(session)}
+          accessibilityRole="button"
+          accessibilityHint={t('record.open')}
+        >
           <View style={styles.cardHeader}>
             <Ionicons name="car-outline" size={18} color="#00C853" />
-            <Text style={styles.cardType}>{spotTypeLabel(session.spotType)}</Text>
+            <Text style={styles.cardType} numberOfLines={1}>
+              {session.record?.road ?? spotTypeLabel(session.spotType)}
+            </Text>
             {session.hitLimit && (
               <View style={styles.limitBadge}>
                 <Text style={styles.limitBadgeText}>{t('history.limitHit')}</Text>
@@ -143,8 +154,14 @@ export default function HistoryScreen() {
               <Text style={styles.cardCity}>{session.spotCity}</Text>
             </View>
           )}
-        </View>
+
+          <View style={styles.recordLink}>
+            <Ionicons name="document-text-outline" size={14} color="#00E676" />
+            <Text style={styles.recordLinkText}>{t('record.open')}</Text>
+          </View>
+        </TouchableOpacity>
       ))}
+      <ParkingRecordModal session={recordFor} onClose={() => setRecordFor(null)} />
     </ScrollView>
   );
 }
@@ -237,5 +254,16 @@ const styles = StyleSheet.create({
   cardCity: {
     color: '#777',
     fontSize: 13,
+  },
+  recordLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  recordLinkText: {
+    color: '#00E676',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

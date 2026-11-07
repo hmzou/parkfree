@@ -62,14 +62,22 @@ service cloud.firestore {
     }
 
     // Sessions — each user can only read/write their own
+    // Sessions double as a parking record for contesting tickets, so the
+    // server sets the times and the position and record can't be edited later.
+    // Ending a session may only set endTime (to the server's clock), active and hitLimit.
     match /sessions/{sessionId} {
       allow read, delete: if signedIn()
         && request.auth.uid == resource.data.userId;
       allow create: if signedIn()
-        && request.auth.uid == request.resource.data.userId;
+        && request.auth.uid == request.resource.data.userId
+        && request.resource.data.startTime == request.time
+        && request.resource.data.endTime == null;
       allow update: if signedIn()
         && request.auth.uid == resource.data.userId
-        && request.resource.data.userId == resource.data.userId;
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['endTime', 'active', 'hitLimit'])
+        && (request.resource.data.endTime == null
+            || request.resource.data.endTime == request.time);
     }
 
     // Per-user occupant markers behind the business occupancy meter. Each user

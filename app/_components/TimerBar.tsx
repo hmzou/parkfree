@@ -22,19 +22,10 @@ const PHASE_COLORS = {
   red: '#F44336',
 };
 
-function formatDuration(totalSeconds: number): string {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  if (h > 0) {
-    return `${h}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
-  }
-  return `${m}m ${s.toString().padStart(2, '0')}s`;
-}
-
+/** "Parked 25 min · no time limit": an untimed session counts up, in words. */
 function formatElapsed(startTime: Date): string {
-  const secs = Math.floor((Date.now() - startTime.getTime()) / 1000);
-  return formatDuration(secs);
+  const minutes = Math.max(0, Math.floor((Date.now() - startTime.getTime()) / 60_000));
+  return t('session.parkedFor', { duration: formatMinutes(minutes) });
 }
 
 export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, spotLabel, onLeave, onFindCar, loading }) => {

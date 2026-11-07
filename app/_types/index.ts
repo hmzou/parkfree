@@ -41,6 +41,36 @@ export interface ParkingSession {
   spotType?: string;
   spotCity?: string;
   hitLimit?: boolean;
+  /** What the app showed when the user parked, kept as evidence (see ParkingRecord) */
+  record?: ParkingRecord;
+}
+
+/**
+ * Snapshot saved when a session starts, for contesting a ticket: where the car
+ * was, which rule the map showed and where that rule came from. Firestore rules
+ * make it read-only once written, and the server sets the start and end times.
+ */
+export interface ParkingRecord {
+  /** Street name as shown on the map */
+  road: string | null;
+  city: string;
+  /** Map layer that was tapped: street, permit, paid, free15, or a pin type */
+  kind: string;
+  /** 'osm' = mapped curb, 'default' = city default rule, 'city' = city meter or permit data */
+  basis: string;
+  /** The verdict line the user saw, in their language at the time */
+  verdict: string;
+  /** Latest time the app said the car could stay, ISO 8601; null = no limit */
+  leaveBy: string | null;
+  /** Posted limit, if mapped */
+  maxstay: string | null;
+  /** Where the car's position came from */
+  positionSource: 'gps' | 'map';
+  /** GPS accuracy in metres when positionSource is gps */
+  accuracyMeters: number | null;
+  /** When the map data was built, ISO 8601 */
+  dataAsOf: string | null;
+  locale: 'en' | 'fr';
 }
 
 export interface UserSpotSubmission {

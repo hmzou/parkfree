@@ -18,6 +18,8 @@ export const MAP_COLORS = {
   cityLot: '#1E88E5',
   // Street lines: one colour per answer to "can I park here?"
   streetFree: '#00E676',
+  /** Legend swatch for the faint default-rule green (same hue at the line's opacity on the dark map) */
+  streetFreeDefault: '#0E6B3B',
   streetNo: '#FF1744',
   streetPaid: '#2979FF',
 } as const;
@@ -30,7 +32,12 @@ export const LINE_WIDTH = [
   15, 3,
   18, 6,
 ] as const;
-export const LINE_OPACITY = 0.9;
+/**
+ * Lines checked against the signs (OpenStreetMap curbs, city meter data) are
+ * drawn solid; streets coloured only by the city's default rule are fainter,
+ * so a glance shows which answers are certain.
+ */
+export const LINE_OPACITY = ['case', ['==', ['get', 'basis'], 'default'], 0.45, 0.95] as const;
 /** Paid segments sit on their recorded curb (`curb` = ±1), beside the street centreline */
 const CURB = ['coalesce', ['get', 'curb'], 0];
 export const LINE_OFFSET = [
@@ -152,6 +159,7 @@ export function legendItems(showOverlays: boolean, showWinterParking: boolean): 
   // Lines and pins share the same three colours, so one row covers both
   const items: LegendItem[] = [
     { color: MAP_COLORS.streetFree, key: 'map.legendStreetFree', shape: 'line' },
+    { color: MAP_COLORS.streetFreeDefault, key: 'map.legendStreetDefault', shape: 'line' },
     { color: MAP_COLORS.streetNo, key: 'map.legendStreetNo', shape: 'line' },
     { color: MAP_COLORS.streetPaid, key: 'map.legendStreetPaid', shape: 'line' },
     { color: MAP_COLORS.streetFree, key: 'map.legendUnclear', shape: 'ring' },

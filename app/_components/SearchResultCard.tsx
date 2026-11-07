@@ -13,7 +13,7 @@ import { ParkingSpot } from '../_types';
 import { haversineMeters } from '../_services/overpass';
 import type { NearestStreet } from '../_services/nearestStreet';
 import { formatWhen } from '../_i18n/time';
-import { ottawaDefaultLeaveBy } from '../_services/parkingRules';
+import { streetUntilText } from './OverlayInfoCard';
 
 interface Props {
   /** The geocoded location the user searched for */
@@ -75,11 +75,7 @@ export const SearchResultCard: React.FC<Props> = ({
   const subLabel = useStreet
     ? t('map.nearestFreeSub', {
         distance: distLabelFor(distMeters),
-        time: formatWhen(
-          nearestStreet!.kind === 'free15'
-            ? new Date(Date.now() + 15 * 60_000)
-            : ottawaDefaultLeaveBy(new Date()),
-        ),
+        until: streetUntilText({ ...nearestStreet!.properties, kind: nearestStreet!.kind }),
       })
     : null;
 

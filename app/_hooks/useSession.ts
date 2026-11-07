@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ParkingSession } from '../_types';
+import { ParkingRecord, ParkingSession } from '../_types';
 import {
   ensureAnonymousAuth,
   startSession,
@@ -32,6 +32,7 @@ interface UseSessionResult {
     warnMinutes?: number,
     spotType?: string,
     spotCity?: string,
+    record?: ParkingRecord,
   ) => Promise<void>;
   stopParking: (hitLimit?: boolean) => Promise<void>;
   loading: boolean;
@@ -68,6 +69,7 @@ export function useSession(): UseSessionResult {
       warnMinutes = 10,
       spotType?: string,
       spotCity?: string,
+      record?: ParkingRecord,
     ) => {
       setLoading(true);
       try {
@@ -82,6 +84,7 @@ export function useSession(): UseSessionResult {
           warnMinutes,
           spotType,
           spotCity,
+          record,
         );
 
         const now = new Date();
@@ -108,6 +111,7 @@ export function useSession(): UseSessionResult {
           warnMinutes,
           spotType,
           spotCity,
+          record,
         };
         setSession(newSession);
 

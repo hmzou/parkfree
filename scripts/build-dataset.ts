@@ -19,6 +19,7 @@ import {
   runOverpassQuery,
 } from '../app/_services/overpass';
 import type { DatasetSpot, ParkFreeDataset, OverlayKind } from '../app/_services/dataset';
+import { curbFeatures, hasCurbAnswer, OsmWay } from './curbs';
 
 const OUT_FILE = join(__dirname, '..', 'assets', 'data', 'parkfree-data.json');
 const ARCGIS = 'https://maps.ottawa.ca/arcgis/rest/services/Parking/MapServer';
@@ -43,6 +44,8 @@ interface LayerSpec {
   where?: string;
   /** Simplify lines to this tolerance in degrees (~1e-5 ≈ 1 m) to keep the file small */
   maxAllowableOffset?: number;
+  /** Constant properties added to every feature */
+  extra?: Record<string, string | number>;
   /** Extra per-feature properties computed from the geometry and output properties */
   derive?: (geometry: GeoJSON.Geometry, properties: Record<string, string | number>) => Record<string, string | number>;
 }
@@ -92,16 +95,18 @@ const LAYERS: LayerSpec[] = [
   { id: 14, kind: 'permit', fields: { area: 'AREA_NAME', areaFr: 'AREA_NAME_FR', areaNumber: 'AREA_NUMBER' } },
   { id: 1, kind: 'free15', fields: {} },
   // Road centrelines. By-law 2017-301 lets anyone park on a public street that has
-  // no signs (3 h on weekdays 7–19, 6 h weekends), so local and collector roads
-  // are drawn as free. Arterials vary block by block and are left uncoloured
-  // rather than guessed. Freeways, ramps and transit-only roads never allow it.
+  // no signs (3 h on weekdays 7–19, 6 h weekends), so local roads are drawn as
+  // free by default. Collectors and arterials often carry no-parking or rush-hour
+  // signs, so they are only coloured where OpenStreetMap records their curbs.
+  // Freeways, ramps and transit-only roads never allow it.
   {
     id: 3,
     kind: 'street',
     service: STREETS,
-    where: "SUBCLASS IN ('LOCAL','COLLECTOR') AND OWNERSHIP='PUBLIC' AND CURRENT_STATUS='OPERATIONAL'",
+    where: "SUBCLASS='LOCAL' AND OWNERSHIP='PUBLIC' AND CURRENT_STATUS='OPERATIONAL'",
     fields: { road: 'ROAD_NAME_FULL' },
     maxAllowableOffset: 0.00003,
+    extra: { basis: 'default', city: 'Ottawa' },
   },
   {
     id: 3,
@@ -110,6 +115,7 @@ const LAYERS: LayerSpec[] = [
     where: "SUBCLASS IN ('FREEWAY','HIGHWAY','RAMP','TRANSITWAY','BUSONLY') AND CURRENT_STATUS='OPERATIONAL'",
     fields: { road: 'ROAD_NAME_FULL' },
     maxAllowableOffset: 0.00003,
+    extra: { city: 'Ottawa' },
   },
   {
     id: 6,
@@ -149,7 +155,7 @@ async function fetchLayer(layer: LayerSpec): Promise<GeoJSON.Feature[]> {
     const pageFeatures: GeoJSON.Feature[] = page.features ?? [];
     for (const feature of pageFeatures) {
       if (!feature.geometry) continue;
-      const properties: Record<string, string | number> = { kind: layer.kind };
+      const properties: Record<string, string | number> = { kind: layer.kind, ...layer.extra };
       for (const [name, field] of Object.entries(layer.fields)) {
         const value = feature.properties?.[field];
         if (value !== null && value !== undefined && value !== '') properties[name] = value;
@@ -301,17 +307,11 @@ function cellKey(p: number[]): string {
   return `${Math.floor(p[0] / GRID_DEG)}:${Math.floor(p[1] / GRID_DEG)}`;
 }
 
-/**
- * A block with meters on its curbs must not also show a green line. Drop a
- * street or permit-road segment when at least PAID_SHARE_TO_DROP of its length
- * lies within PAID_NEARBY_METRES of a paid curb segment. Matching is by
- * geometry only: the permit layer has no road names.
- */
-function dropFreeWherePaid(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
-  // Grid of paid sub-segments, each registered in the cells of its endpoints
+/** Grid index of line segments for fast "is this point near any of them?" checks. */
+function segmentIndex(features: GeoJSON.Feature[]): (p: number[], metres: number) => boolean {
   const grid = new Map<string, [number[], number[]][]>();
   for (const f of features) {
-    if (f.properties?.kind !== 'paid' || !f.geometry) continue;
+    if (!f.geometry) continue;
     for (const line of lineParts(f.geometry)) {
       for (let i = 1; i < line.length; i++) {
         const seg: [number[], number[]] = [line[i - 1], line[i]];
@@ -323,24 +323,195 @@ function dropFreeWherePaid(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
       }
     }
   }
-  const nearPaid = (p: number[]): boolean => {
+  return (p, metres) => {
     const cx = Math.floor(p[0] / GRID_DEG), cy = Math.floor(p[1] / GRID_DEG);
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (const [a, b] of grid.get(`${cx + dx}:${cy + dy}`) ?? []) {
-          if (pointToSegmentMetres(p, a, b) < PAID_NEARBY_METRES) return true;
+          if (pointToSegmentMetres(p, a, b) < metres) return true;
         }
       }
     }
     return false;
   };
+}
+
+/**
+ * Drop each `target` feature when at least `share` of its length lies within
+ * `metres` of a `source` feature. Matching is by geometry only, since the
+ * layers name roads differently (or not at all).
+ */
+function dropCovered(
+  features: GeoJSON.Feature[],
+  isTarget: (f: GeoJSON.Feature) => boolean,
+  isSource: (f: GeoJSON.Feature) => boolean,
+  metres: number,
+  share: number,
+): GeoJSON.Feature[] {
+  const near = segmentIndex(features.filter(isSource));
   return features.filter(f => {
-    if (!GREEN_KINDS.has(f.properties?.kind) || !f.geometry) return true;
+    if (!isTarget(f) || !f.geometry) return true;
     const samples = lineParts(f.geometry).flatMap(samplePoints);
     if (samples.length === 0) return true;
-    const near = samples.filter(nearPaid).length;
-    return near / samples.length < PAID_SHARE_TO_DROP;
+    return samples.filter(p => near(p, metres)).length / samples.length < share;
   });
+}
+
+/** A block with meters on its curbs must not also show a green line. */
+function dropFreeWherePaid(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
+  return dropCovered(
+    features,
+    f => GREEN_KINDS.has(f.properties?.kind),
+    f => f.properties?.kind === 'paid',
+    PAID_NEARBY_METRES,
+    PAID_SHARE_TO_DROP,
+  );
+}
+
+/** Where OSM records a street's curbs, its side lines replace the centreline guess. */
+const OSM_MATCH_METRES = 12;
+function dropDefaultWhereMapped(features: GeoJSON.Feature[]): GeoJSON.Feature[] {
+  return dropCovered(
+    features,
+    f => f.properties?.basis === 'default',
+    f => f.properties?.basis === 'osm',
+    OSM_MATCH_METRES,
+    0.5,
+  );
+}
+
+// ─── OpenStreetMap curb sides ────────────────────────────────────────────────
+
+const CURB_KEYS = '^parking:(both|left|right|lane:both|lane:left|lane:right)$';
+
+const CITY_CELL_DEG = 0.004; // ~400 m
+
+/**
+ * Which city a point is in, voted by the city-published roads around it: every
+ * Ottawa or Gatineau centreline casts a vote for its ~400 m cell. Mapped curbs
+ * take the majority of their cell and its neighbours.
+ */
+function cityLocator(features: GeoJSON.Feature[]): (lng: number, lat: number) => string | null {
+  const votes = new Map<string, { Ottawa: number; Gatineau: number }>();
+  for (const f of features) {
+    const city = f.properties?.city;
+    if ((city !== 'Ottawa' && city !== 'Gatineau') || f.properties?.basis === 'osm' || !f.geometry) continue;
+    for (const line of lineParts(f.geometry)) {
+      for (const [lng, lat] of line) {
+        const key = `${Math.floor(lng / CITY_CELL_DEG)}:${Math.floor(lat / CITY_CELL_DEG)}`;
+        const v = votes.get(key) ?? { Ottawa: 0, Gatineau: 0 };
+        v[city as 'Ottawa' | 'Gatineau'] += 1;
+        votes.set(key, v);
+      }
+    }
+  }
+  return (lng, lat) => {
+    const cx = Math.floor(lng / CITY_CELL_DEG), cy = Math.floor(lat / CITY_CELL_DEG);
+    let ottawa = 0, gatineau = 0;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const v = votes.get(`${cx + dx}:${cy + dy}`);
+        // The point's own cell counts double so river-edge cells lean the right way
+        const w = dx === 0 && dy === 0 ? 2 : 1;
+        if (v) { ottawa += v.Ottawa * w; gatineau += v.Gatineau * w; }
+      }
+    }
+    if (ottawa === 0 && gatineau === 0) return null;
+    return gatineau > ottawa ? 'Gatineau' : 'Ottawa';
+  };
+}
+
+async function fetchCurbFeatures(locate: (lng: number, lat: number) => string | null): Promise<GeoJSON.Feature[]> {
+  const { south, west, north, east } = REGION_BBOX;
+  const query = `[out:json][timeout:180];way(${south},${west},${north},${east})[highway][~"${CURB_KEYS}"~"."];out tags geom;`;
+  const elements = (await runOverpassQuery(query, OVERPASS_TIMEOUT_MS)) as unknown as OsmWay[];
+  const features: GeoJSON.Feature[] = [];
+  for (const way of elements) {
+    if (!hasCurbAnswer(way) || !way.geometry?.length) continue;
+    const mid = way.geometry[Math.floor(way.geometry.length / 2)];
+    const city = locate(mid.lon, mid.lat);
+    // Outside both cities' road networks (Chelsea, Cantley, …): rules unknown
+    if (!city) continue;
+    for (const f of curbFeatures(way, city)) {
+      const g = f.geometry as GeoJSON.LineString;
+      g.coordinates = compactLine(g.coordinates);
+      features.push(f);
+    }
+  }
+  return features;
+}
+
+// ─── Gatineau road network (Ville de Gatineau open data) ─────────────────────
+
+const GATINEAU_ROADS =
+  'https://www.donneesquebec.ca/recherche/dataset/35695cd5-531e-45c9-9f2c-6cb82ffcedbf/resource/fbbb839a-3b66-47cc-baab-cd4021b09205/download/voie_publique.json';
+
+/**
+ * Downtown Hull (Île de Hull, Vieux-Hull) has meters and time-limited zones that
+ * Gatineau does not publish, so its local streets are left uncoloured rather
+ * than guessed. [west, south, east, north]
+ */
+const HULL_PAID_CORE: [number, number, number, number] = [-75.7400, 45.4180, -75.7080, 45.4420];
+
+function insideBox(line: number[][], [w, s, e, n]: [number, number, number, number]): boolean {
+  return line.some(([lng, lat]) => lng >= w && lng <= e && lat >= s && lat <= n);
+}
+
+const SIMPLIFY_METRES = 3;
+
+/** Douglas–Peucker: drop points that sit within `tolerance` metres of the simplified line. */
+function simplify(line: number[][], tolerance = SIMPLIFY_METRES): number[][] {
+  if (line.length <= 2) return line;
+  let maxD = 0, index = 0;
+  for (let i = 1; i < line.length - 1; i++) {
+    const d = pointToSegmentMetres(line[i], line[0], line[line.length - 1]);
+    if (d > maxD) { maxD = d; index = i; }
+  }
+  if (maxD <= tolerance) return [line[0], line[line.length - 1]];
+  const left = simplify(line.slice(0, index + 1), tolerance);
+  return [...left.slice(0, -1), ...simplify(line.slice(index), tolerance)];
+}
+
+/** Round to ~1 m, drop repeated points and simplify to keep the bundled file small. */
+export function compactLine(line: number[][]): number[][] {
+  const out: number[][] = [];
+  for (const [lng, lat] of line) {
+    const p = [Number(lng.toFixed(5)), Number(lat.toFixed(5))];
+    const last = out[out.length - 1];
+    if (!last || last[0] !== p[0] || last[1] !== p[1]) out.push(p);
+  }
+  return simplify(out);
+}
+
+/**
+ * Règlement 300-2006 sets no time limit on unsigned Gatineau streets (art. 52
+ * only applies where a sign is posted), so local streets are free by default;
+ * the Dec 1 – Apr 1 overnight ban is applied by the app. Collectors and
+ * arterials are left to OSM, highways and ramps are never allowed.
+ */
+async function fetchGatineauStreets(): Promise<GeoJSON.Feature[]> {
+  const data = await fetchJson(GATINEAU_ROADS);
+  const features: GeoJSON.Feature[] = [];
+  for (const f of data.features ?? []) {
+    const p = f.properties ?? {};
+    if (!f.geometry) continue;
+    const highway = p.HIERARCHI === 'Autoroute' || p.TYPE === 'Bretelle';
+    const local = p.HIERARCHI === 'Rue locale'
+      && ['Standard', 'Cul-de-sac carré', 'Cul-de-sac circulaire', 'Jointure'].includes(p.TYPE);
+    if (!highway && !local) continue;
+    const lines = lineParts(f.geometry).map(compactLine).filter(l => l.length >= 2);
+    if (lines.length === 0) continue;
+    if (local && lines.some(l => insideBox(l, HULL_PAID_CORE))) continue;
+    const geometry: GeoJSON.Geometry = lines.length === 1
+      ? { type: 'LineString', coordinates: lines[0] }
+      : { type: 'MultiLineString', coordinates: lines };
+    const properties: Record<string, string | number> = highway
+      ? { kind: 'noParking', city: 'Gatineau' }
+      : { kind: 'street', basis: 'default', city: 'Gatineau' };
+    if (p.NOM_TOPO) properties.road = p.NOM_TOPO;
+    features.push({ type: 'Feature', geometry, properties });
+  }
+  return features;
 }
 
 function readPrevious(): ParkFreeDataset | null {
@@ -381,9 +552,26 @@ async function main() {
     }
   }
 
-  const streetsBefore = overlays.length;
-  const cleaned = dropFreeWherePaid(overlays);
-  console.log(`Removed ${streetsBefore - cleaned.length} green segments that have paid curbs`);
+  for (const [label, fetcher, keep] of [
+    ['Gatineau streets', fetchGatineauStreets, (f: GeoJSON.Feature) => f.properties?.city === 'Gatineau' && f.properties?.basis !== 'osm'],
+    ['OSM curbs', () => fetchCurbFeatures(cityLocator(overlays)), (f: GeoJSON.Feature) => f.properties?.basis === 'osm'],
+  ] as const) {
+    try {
+      const features = await fetcher();
+      overlays.push(...features);
+      console.log(`${label}: ${features.length} features`);
+    } catch (err) {
+      const kept = previous?.overlays.features.filter(keep) ?? [];
+      overlays.push(...kept);
+      console.warn(`${label} failed, keeping ${kept.length}:`, (err as Error).message);
+    }
+  }
+
+  let cleaned = dropDefaultWhereMapped(overlays);
+  console.log(`Replaced ${overlays.length - cleaned.length} default streets with mapped curbs`);
+  const beforePaid = cleaned.length;
+  cleaned = dropFreeWherePaid(cleaned);
+  console.log(`Removed ${beforePaid - cleaned.length} green segments that have paid curbs`);
   overlays.length = 0;
   overlays.push(...cleaned);
 

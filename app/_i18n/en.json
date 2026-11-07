@@ -41,7 +41,8 @@
     "noFixWeb": "Can't find your location — showing downtown Ottawa. Turn on Location Services for this browser in your computer's settings.",
     "locateMe": "Show my location",
     "nearestFree": "Free parking on %{road}",
-    "nearestFreeSub": "%{distance} away · free until %{time}"
+    "nearestFreeSub": "%{distance} away · %{until}",
+    "legendStreetDefault": "Free by the city's default rule — check signs"
   },
   "rules": {
     "okUntil": "OK until %{time}",
@@ -97,7 +98,20 @@
     "shouldBe": "It should be:",
     "correctionThanks": "Thanks — we’ll review it and fix the map.",
     "freeNowUntil": "Free now · park until %{time} (unless signs say otherwise)",
-    "parkedHere": "I parked here · remind me before %{time}"
+    "parkedHere": "I parked here · remind me before %{time}",
+    "untilTime": "free until %{time}",
+    "noTimeLimit": "free, no time limit",
+    "bannedUntil": "no parking until %{time}",
+    "freeNowNoLimit": "Free now · no time limit (unless signs say otherwise)",
+    "bannedNow": "Overnight winter ban · parking allowed again at %{time}",
+    "gatineauDefaultDetail": "No signs = free, no time limit (Gatineau by-law 300-2006). Dec 1 – Apr 1: no parking 12–6 a.m. weekdays and 3–6 a.m. weekends. Posted signs always win.",
+    "mappedFreeDetail": "Parking allowed on this side of the street, as mapped from the signs by OpenStreetMap contributors.",
+    "mappedNoDetail": "No parking on this side of the street, as mapped from the signs by OpenStreetMap contributors.",
+    "mappedMaxstay": "Posted limit: %{limit}",
+    "defaultBasis": "This block hasn't been checked against its signs yet — this is the city's default rule. Check the posted signs.",
+    "sourceOsm": "Source: OpenStreetMap contributors",
+    "sourceGatineau": "Source: Ville de Gatineau open data",
+    "parkedHereNoLimit": "I parked here"
   },
   "car": {
     "saved": "Car location saved on this phone",
@@ -163,7 +177,8 @@
     "expiredMessage": "Your parking timer has expired at %{spot}.",
     "warningTitle": "Parking expiring soon",
     "warningMessage": "Your parking expires in %{minutes} minutes.",
-    "timeLeftLong": "%{duration} left"
+    "timeLeftLong": "%{duration} left",
+    "parkedFor": "Parked %{duration} · no time limit"
   },
   "directions": {
     "title": "Get Directions",
@@ -240,5 +255,41 @@
     "spotsUsed": "%{used} / %{total} spaces used",
     "lotFull": "This lot is full",
     "nearestFreeIs": "Nearest free parking is %{distance} away"
+  },
+  "common": {
+    "close": "Close"
+  },
+  "record": {
+    "title": "Parking record — ParkFree",
+    "intro": "Use this if you get a ticket you think is wrong: it shows when and where you parked and the rule the map showed you.",
+    "open": "Parking record",
+    "id": "Record ID",
+    "parkedAt": "Parked at",
+    "leftAt": "Left at",
+    "stillParked": "Still parked",
+    "location": "Location",
+    "mapLink": "Map",
+    "position": "How the position was recorded",
+    "positionGps": "Phone GPS, accurate to about %{meters} m",
+    "positionMap": "Point tapped on the map",
+    "ruleShown": "Rule shown by the app",
+    "allowedUntil": "Allowed until",
+    "postedLimit": "Posted limit (mapped)",
+    "ruleSource": "Where the rule came from",
+    "dataAsOf": "Map data as of",
+    "withinLimit": "Left before the limit",
+    "yes": "Yes",
+    "no": "No",
+    "verdictPaid": "Paid parking, max %{hours} h",
+    "basisOsm": "Curb signs mapped by OpenStreetMap contributors",
+    "basisDefaultOttawa": "City of Ottawa default for unsigned streets (by-law 2017-301: 3 h weekdays 7 a.m.–7 p.m., 6 h weekends)",
+    "basisDefaultGatineau": "Ville de Gatineau default for unsigned streets (by-law 300-2006: no time limit; winter overnight ban Dec 1 – Apr 1)",
+    "basisCity": "City of Ottawa parking data (meters, permit and 15-minute zones)",
+    "basisOther": "Parking spot data shown on the map",
+    "integrity": "The parked and left times were set by ParkFree's server clock, not the phone, and the location and rule can't be edited after the record was created.",
+    "disclaimer": "ParkFree is not affiliated with the City of Ottawa or the Ville de Gatineau. Posted signs take priority over the map. Add your own photos of the car and the signs when you contest a ticket.",
+    "noSnapshot": "This session was recorded before ParkFree saved the rule shown, so only the times and location are available.",
+    "share": "Share or save record",
+    "shareFailed": "Couldn't open the share sheet. Allow pop-ups for this site, or copy the text above."
   }
 }
