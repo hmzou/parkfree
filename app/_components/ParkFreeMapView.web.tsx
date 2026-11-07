@@ -33,7 +33,10 @@ export interface ParkFreeMapViewHandle {
 }
 
 interface Props {
-  userCoordinate: Coordinate;
+  /** Null until a real fix arrives: never draw the fallback as "you are here" */
+  userCoordinate: Coordinate | null;
+  /** Fix accuracy in metres, drawn as a circle around the dot */
+  userAccuracyMeters?: number | null;
   spots: ParkingSpot[];
   selectedSpotId: string | null;
   isCached: boolean;
@@ -47,6 +50,29 @@ interface Props {
   onOverlayPress: (info: OverlayInfo) => void;
   onMapMoved: (coord: Coordinate) => void;
   onLongPress: (coord: Coordinate) => void;
+}
+
+const DEFAULT_CENTER: Coordinate = { latitude: 45.4215, longitude: -75.6972 };
+
+/** Mapbox GL metres-per-pixel at zoom 0 on the equator (512 px tiles) */
+const METRES_PER_PX_Z0 = 78271.517;
+
+function userGeoJSON(coord: Coordinate | null, accuracy: number | null) {
+  const cos = coord ? Math.cos((coord.latitude * Math.PI) / 180) : 1;
+  const acc = accuracy && accuracy > 0 ? accuracy : 0;
+  return {
+    type: 'FeatureCollection' as const,
+    features: coord
+      ? [{
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [coord.longitude, coord.latitude] },
+          properties: {
+            r0: acc / (METRES_PER_PX_Z0 * cos),
+            r22: acc / ((METRES_PER_PX_Z0 / 2 ** 22) * cos),
+          },
+        }]
+      : [],
+  };
 }
 
 function pointCollection(coord: Coordinate | null) {
@@ -92,6 +118,7 @@ function loadMapbox(): Promise<any> {
 
 export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   userCoordinate,
+  userAccuracyMeters = null,
   spots,
   selectedSpotId,
   isCached,
@@ -123,6 +150,11 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   const onLongPressRef = useRef(onLongPress);
   onSpotPressRef.current = onSpotPress;
   onOverlayPressRef.current = onOverlayPress;
+  // The map is created once; layers read the latest user position from refs
+  const userCoordinateRef = useRef(userCoordinate);
+  userCoordinateRef.current = userCoordinate;
+  const userAccuracyRef = useRef(userAccuracyMeters);
+  userAccuracyRef.current = userAccuracyMeters;
   onMapMovedRef.current = onMapMoved;
   onLongPressRef.current = onLongPress;
 
@@ -161,12 +193,15 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
         const map = new mapboxgl.Map({
           container: node,
           style: 'mapbox://styles/mapbox/dark-v11',
-          center: [userCoordinate.longitude, userCoordinate.latitude],
+          center: [
+            (userCoordinate ?? DEFAULT_CENTER).longitude,
+            (userCoordinate ?? DEFAULT_CENTER).latitude,
+          ],
           zoom: 14,
           attributionControl: true,
         });
-        // Top corners sit under the app's search overlay
-        map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
+        // No zoom buttons: pinch / scroll zoom, and the app's own find-me and
+        // add buttons own the bottom-right corner.
         mapRef.current = map;
         // Dev-only handle for poking at the map from the browser console
         if (__DEV__) (window as any).__TEMP_MAP__ = map;
@@ -265,7 +300,27 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
               'circle-opacity': 1,
             },
           });
-          map.addSource('user', { type: 'geojson', data: pointCollection(userCoordinate) });
+          map.addSource('user', {
+            type: 'geojson',
+            data: userGeoJSON(userCoordinateRef.current, userAccuracyRef.current),
+          });
+          // Accuracy circle: radius in metres converted to pixels at every zoom
+          map.addLayer({
+            id: 'user-accuracy',
+            type: 'circle',
+            source: 'user',
+            paint: {
+              'circle-color': 'rgba(33,150,243,0.12)',
+              'circle-stroke-color': 'rgba(33,150,243,0.4)',
+              'circle-stroke-width': 1,
+              'circle-radius': [
+                'interpolate', ['exponential', 2], ['zoom'],
+                0, ['get', 'r0'],
+                22, ['get', 'r22'],
+              ],
+              'circle-pitch-alignment': 'map',
+            },
+          });
           map.addLayer({
             id: 'user-dot',
             type: 'circle',
@@ -434,8 +489,8 @@ export const ParkFreeMapView = forwardRef<ParkFreeMapViewHandle, Props>(({
   }, [mapLoaded, showOverlays]);
 
   useEffect(() => {
-    mapRef.current?.getSource('user')?.setData(pointCollection(userCoordinate));
-  }, [userCoordinate]);
+    mapRef.current?.getSource('user')?.setData(userGeoJSON(userCoordinate, userAccuracyMeters));
+  }, [mapLoaded, userCoordinate, userAccuracyMeters]);
 
   useEffect(() => {
     mapRef.current?.getSource('search')?.setData(pointCollection(searchMarker ?? null));

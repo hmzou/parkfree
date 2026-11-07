@@ -36,7 +36,12 @@
     "legendStreetNo": "Stationnement interdit",
     "legendStreetPaid": "Stationnement payant",
     "locationOff": "Localisation désactivée — centre-ville d’Ottawa affiché",
-    "enableLocation": "Activer"
+    "enableLocation": "Activer",
+    "noFix": "Position introuvable — centre-ville d’Ottawa affiché. Vérifiez que la localisation est activée.",
+    "noFixWeb": "Position introuvable — centre-ville d’Ottawa affiché. Activez le service de localisation pour ce navigateur dans les réglages de l’ordinateur.",
+    "locateMe": "Afficher ma position",
+    "nearestFree": "Stationnement gratuit sur %{road}",
+    "nearestFreeSub": "à %{distance} · gratuit jusqu’à %{time}"
   },
   "rules": {
     "okUntil": "Permis jusqu'à %{time}",
@@ -91,7 +96,8 @@
     "wrongColour": "Mauvaise couleur? Dites-le-nous",
     "shouldBe": "Ça devrait être :",
     "correctionThanks": "Merci — nous allons vérifier et corriger la carte.",
-    "freeNowUntil": "Gratuit maintenant · jusqu’à %{time} (sauf indication contraire)"
+    "freeNowUntil": "Gratuit maintenant · jusqu’à %{time} (sauf indication contraire)",
+    "parkedHere": "Je suis stationné ici · rappel avant %{time}"
   },
   "car": {
     "saved": "Emplacement enregistré sur ce téléphone",
@@ -139,7 +145,8 @@
     "cancel": "Annuler",
     "confirm": "Confirmer",
     "close": "Fermer",
-    "submit": "Soumettre"
+    "submit": "Soumettre",
+    "needLocation": "Activez la localisation pour vous stationner ici"
   },
   "session": {
     "parkedAt": "Stationné à",
@@ -155,7 +162,8 @@
     "expired": "Temps de stationnement expiré",
     "expiredMessage": "Votre minuterie de stationnement a expiré à %{spot}.",
     "warningTitle": "Stationnement bientôt expiré",
-    "warningMessage": "Votre stationnement expire dans %{minutes} minutes."
+    "warningMessage": "Votre stationnement expire dans %{minutes} minutes.",
+    "timeLeftLong": "%{duration} restant"
   },
   "directions": {
     "title": "Obtenir l'itinéraire",

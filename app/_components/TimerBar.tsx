@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { TimerState } from '../_types';
 import { t } from '../_i18n';
+import { formatDuration as formatMinutes } from '../_i18n/time';
 import { useLocale } from '../_contexts/LocaleContext';
 
 interface Props {
@@ -53,10 +54,13 @@ export const TimerBar: React.FC<Props> = ({ timer, sessionStartTime, spotLabel, 
   const barColor = timer.active ? PHASE_COLORS[timer.phase] : '#00C853';
 
   const timeDisplay = timer.active && timer.durationMinutes > 0
-    ? t('session.timeRemaining', {
-        minutes: Math.floor(timer.remainingSeconds / 60),
-        seconds: timer.remainingSeconds % 60,
-      })
+    ? timer.remainingSeconds >= 3600
+      // "11 h 51 min left" — seconds only matter in the final hour
+      ? t('session.timeLeftLong', { duration: formatMinutes(Math.floor(timer.remainingSeconds / 60)) })
+      : t('session.timeRemaining', {
+          minutes: Math.floor(timer.remainingSeconds / 60),
+          seconds: timer.remainingSeconds % 60,
+        })
     : sessionStartTime
     ? formatElapsed(sessionStartTime)
     : '—';

@@ -13,10 +13,10 @@ import { useSessionContext } from '../_contexts/SessionContext';
 import { useLocale } from '../_contexts/LocaleContext';
 import { getSessionHistory } from '../_services/firebase';
 import { ParkingSession } from '../_types';
-import { t } from '../_i18n';
+import { t, getLocale } from '../_i18n';
 
 function formatDate(date: Date): string {
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(getLocale() === 'fr' ? 'fr-CA' : 'en-CA', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -24,7 +24,7 @@ function formatDate(date: Date): string {
 }
 
 function formatTime(date: Date): string {
-  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString(getLocale() === 'fr' ? 'fr-CA' : 'en-CA', { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatDuration(startTime: Date, endTime: Date | null): string {

@@ -151,7 +151,8 @@ export function useSession(): UseSessionResult {
       });
       await markSpotFree(session.spotId).catch(() => null);
       await leaveSpotOccupants(session.spotId, session.userId).catch(() => null);
-      await cancelAllNotifications();
+      // Leaving must always work: a notification error can't keep you "parked"
+      await cancelAllNotifications().catch(err => console.warn('Could not cancel reminders:', err));
       setSession(null);
     } finally {
       setLoading(false);

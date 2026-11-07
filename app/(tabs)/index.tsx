@@ -34,7 +34,10 @@ import { useParkedCar } from '../_hooks/useParkedCar';
 
 import { ParkingSpot, Coordinate } from '../_types';
 import { t } from '../_i18n';
-import { detectCity, nearestFreeSpots } from '../_services/overpass';
+import { detectCity, haversineMeters, nearestFreeSpots } from '../_services/overpass';
+import { nearestFreeStreet, NearestStreet, prettyRoad } from '../_services/nearestStreet';
+import { formatWhen } from '../_i18n/time';
+import { ottawaDefaultLeaveBy } from '../_services/parkingRules';
 import { GeocodingResult } from '../_services/geocoding';
 import { CityLot, fetchCityLots } from '../_services/cityLots';
 import { parkedCarCoordinate } from '../_services/parkedCar';
@@ -63,7 +66,28 @@ export default function MapScreen() {
   // Subscribe to locale so all t() calls re-evaluate on language switch
   useLocale();
 
-  const { coordinate, permissionStatus, loading: locationLoading, requestPermission } = useLocation();
+  const {
+    coordinate,
+    permissionStatus,
+    loading: locationLoading,
+    hasFix,
+    accuracyMeters,
+    requestPermission,
+  } = useLocation();
+
+  // Jump to the user once, when their first real position arrives (it can come
+  // after the map has already opened on the downtown fallback)
+  const centeredOnFixRef = useRef(false);
+  useEffect(() => {
+    if (!hasFix || centeredOnFixRef.current) return;
+    centeredOnFixRef.current = true;
+    mapRef.current?.flyTo(coordinate.latitude, coordinate.longitude, 16);
+  }, [hasFix, coordinate.latitude, coordinate.longitude]);
+
+  const handleLocateMe = useCallback(() => {
+    if (hasFix) mapRef.current?.flyTo(coordinate.latitude, coordinate.longitude, 16);
+    else void requestPermission();
+  }, [hasFix, coordinate.latitude, coordinate.longitude, requestPermission]);
   const winter = useWinter();
   const {
     spots,
@@ -119,17 +143,37 @@ export default function MapScreen() {
   const parkedCoord = parkedCarCoordinate(car);
 
   // An active session is the car location, including after the app restarts
+  // (keeps the saved label, e.g. the street name, when it is the same spot)
   useEffect(() => {
-    if (!session) return;
+    if (!session || car?.spotId === session.spotId) return;
     void remember({
       lat: session.lat,
       lng: session.lng,
-      label: `${session.spotType ?? 'Parking'} · ${session.spotCity ?? ''}`,
+      label: `${session.spotType === 'street' ? t('spot.street') : session.spotType ?? 'Parking'} · ${session.spotCity ?? ''}`,
       spotId: session.spotId,
     });
-  }, [session, remember]);
+  }, [session, car?.spotId, remember]);
   // Where the user is looking: the last map centre, or their location
   const viewCenter = searchCoord ?? coordinate;
+
+  // The everyday answer: closest free street to you (or to the place searched).
+  // Rounded so small GPS jitter doesn't redo the scan.
+  const glanceFrom = searchCoord ?? (hasFix ? coordinate : null);
+  const glanceKey = glanceFrom
+    ? `${glanceFrom.latitude.toFixed(4)},${glanceFrom.longitude.toFixed(4)}`
+    : null;
+  const searchNearestStreet = useMemo(
+    () => (searchState
+      ? nearestFreeStreet(overlays, { latitude: searchState.result.latitude, longitude: searchState.result.longitude })
+      : null),
+    [searchState, overlays],
+  );
+
+  const nearestStreet = useMemo(
+    () => (glanceFrom ? nearestFreeStreet(overlays, glanceFrom) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [glanceKey, overlays],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -321,6 +365,43 @@ export default function MapScreen() {
     [selectedSpot, startParking, startTimer, remember],
   );
 
+  /**
+   * "I parked here" on a street line. The car is where the phone is when it has
+   * a fix near the tapped street, otherwise where the user tapped.
+   */
+  const handleParkOnStreet = useCallback(async (info: OverlayInfo, timerMinutes: number) => {
+    const tapLat = Number(info.tapLat);
+    const tapLng = Number(info.tapLng);
+    if (!Number.isFinite(tapLat) || !Number.isFinite(tapLng)) return;
+    const nearTap = hasFix
+      && haversineMeters(coordinate.latitude, coordinate.longitude, tapLat, tapLng) < 200;
+    const lat = nearTap ? coordinate.latitude : tapLat;
+    const lng = nearTap ? coordinate.longitude : tapLng;
+    const city = detectCity(lat, lng) === 'Gatineau' ? 'Gatineau' : 'Ottawa';
+    const road = prettyRoad(info.road) ?? t('spot.street');
+    const spotId = `street_${lat.toFixed(5)}_${lng.toFixed(5)}`;
+    await remember({ lat, lng, label: `${road} · ${city}`, spotId });
+    setOverlayInfo(null);
+    try {
+      await startParking(spotId, lat, lng, timerMinutes, 10, 'street', city);
+      startTimer(timerMinutes, 10);
+    } catch {
+      Alert.alert(t('errors.sessionFailed'), t('errors.carSavedAnyway'));
+    }
+  }, [hasFix, coordinate.latitude, coordinate.longitude, remember, startParking, startTimer]);
+
+  /** Fly to a street and open its card, as if the user had tapped the line. */
+  const handleSelectStreet = useCallback((street: NearestStreet) => {
+    mapRef.current?.flyTo(street.lat, street.lng, 17);
+    setSearchState(null);
+    setOverlayInfo({
+      ...(street.properties as OverlayInfo),
+      kind: street.kind,
+      tapLat: street.lat,
+      tapLng: street.lng,
+    });
+  }, []);
+
   const handleToggleRememberCar = useCallback(async () => {
     if (!selectedSpot) return;
     if (car?.spotId === selectedSpot.id) {
@@ -379,7 +460,10 @@ export default function MapScreen() {
   }, [requestPermission]);
 
   // Build a human-readable spot label for the session bar
-  const sessionSpotLabel = session
+  // The car's saved label names the street ("Glebe Ave · Ottawa") when parked on one
+  const sessionSpotLabel = session && car?.spotId === session.spotId
+    ? car.label
+    : session
     ? `${
         session.spotType === 'garage'
           ? t('spot.garage')
@@ -410,7 +494,8 @@ export default function MapScreen() {
       {/* Map */}
       <ParkFreeMapView
         ref={mapRef}
-        userCoordinate={coordinate}
+        userCoordinate={hasFix ? coordinate : null}
+        userAccuracyMeters={accuracyMeters}
         spots={visibleSpots}
         selectedSpotId={selectedSpot?.id ?? null}
         isCached={isCached}
@@ -428,14 +513,15 @@ export default function MapScreen() {
 
       {/* ── Top overlay: app name, search, filters and cards, stacked ─────── */}
       <View style={[styles.topOverlay, { top: insets.top + 8 }]} pointerEvents="box-none">
-        {/* App name row */}
-        <View style={styles.appNameRow}>
-          <Text style={styles.appName}>{t('appName')}</Text>
-          {spotsLoading && (
-            <ActivityIndicator size="small" color="#00C853" style={{ marginLeft: 8 }} />
-          )}
-          {searchLoading && (
-            <ActivityIndicator size="small" color="#2196F3" style={{ marginLeft: 8 }} />
+        {/* Search bar */}
+        <LocationSearchBar onSelectResult={handleSearchSelect} />
+
+        {/* Quick actions */}
+        <View style={styles.chipRow} pointerEvents="box-none">
+          {(spotsLoading || searchLoading) && (
+            <View style={styles.chip}>
+              <ActivityIndicator size="small" color={searchLoading ? '#2196F3' : '#00C853'} />
+            </View>
           )}
           {spotsError && (
             <TouchableOpacity
@@ -446,13 +532,6 @@ export default function MapScreen() {
               <Text style={styles.errorChipText}>{t('errors.retry')}</Text>
             </TouchableOpacity>
           )}
-        </View>
-
-        {/* Search bar */}
-        <LocationSearchBar onSelectResult={handleSearchSelect} />
-
-        {/* Quick actions */}
-        <View style={styles.chipRow} pointerEvents="box-none">
           <TouchableOpacity
             style={styles.chip}
             onPress={() => setStayFinderVisible(true)}
@@ -496,6 +575,18 @@ export default function MapScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Permission granted but no position: the OS or browser is still
+            blocking location. Say so instead of pretending you're downtown. */}
+        {permissionStatus === 'granted' && !hasFix && !locationLoading && (
+          <TouchableOpacity style={styles.offlineBanner} onPress={handleLocateMe} activeOpacity={0.85}>
+            <Ionicons name="warning-outline" size={14} color="#FFB300" />
+            <Text style={[styles.offlineBannerText, { flex: 1 }]} numberOfLines={2}>
+              {t(Platform.OS === 'web' ? 'map.noFixWeb' : 'map.noFix')}
+            </Text>
+            <Text style={styles.locationEnableText}>{t('errors.retry')}</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Without location the map still works, centred on downtown Ottawa */}
         {permissionStatus === 'denied' && (
@@ -555,16 +646,67 @@ export default function MapScreen() {
             searchedLng={searchState.result.longitude}
             searchedName={searchState.result.shortName}
             nearestSpot={searchState.nearestSpot}
+            nearestStreet={searchNearestStreet}
             onDismiss={handleDismissSearchResult}
             onSelectSpot={handleSelectNearestSpot}
+            onSelectStreet={handleSelectStreet}
           />
         )}
 
         {/* Tapped city layer */}
         {overlayInfo && !searchState && (
-          <OverlayInfoCard info={overlayInfo} onDismiss={() => setOverlayInfo(null)} />
+          <OverlayInfoCard
+            info={overlayInfo}
+            onDismiss={() => setOverlayInfo(null)}
+            onParkHere={session ? undefined : (minutes) => { void handleParkOnStreet(overlayInfo, minutes); }}
+          />
         )}
       </View>
+
+      {/* Glance card: nearest free street */}
+      {nearestStreet && !session && !selectedSpot && !overlayInfo && !searchState && (
+        <TouchableOpacity
+          style={[styles.glanceCard, { bottom: insets.bottom + 20 }]}
+          activeOpacity={0.85}
+          onPress={() => {
+            mapRef.current?.flyTo(nearestStreet.lat, nearestStreet.lng, 17);
+            setOverlayInfo({
+              ...(nearestStreet.properties as OverlayInfo),
+              kind: nearestStreet.kind,
+              tapLat: nearestStreet.lat,
+              tapLng: nearestStreet.lng,
+            });
+          }}
+        >
+          <View style={styles.glanceDot} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.glanceTitle} numberOfLines={1}>
+              {t('map.nearestFree', { road: nearestStreet.road ?? t('spot.street') })}
+            </Text>
+            <Text style={styles.glanceSub} numberOfLines={1}>
+              {t('map.nearestFreeSub', {
+                distance: nearestStreet.distanceMeters < 1000
+                  ? `${Math.max(10, Math.round(nearestStreet.distanceMeters / 10) * 10)} m`
+                  : `${(nearestStreet.distanceMeters / 1000).toFixed(1)} km`,
+                time: nearestStreet.kind === 'free15'
+                  ? formatWhen(new Date(Date.now() + 15 * 60_000))
+                  : formatWhen(ottawaDefaultLeaveBy(new Date())),
+              })}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#00E676" />
+        </TouchableOpacity>
+      )}
+
+      {/* Find me */}
+      <TouchableOpacity
+        style={[styles.locateBtn, { bottom: insets.bottom + (session ? 110 : 90) }]}
+        onPress={handleLocateMe}
+        activeOpacity={0.85}
+        accessibilityLabel={t('map.locateMe')}
+      >
+        <Ionicons name={hasFix ? 'locate' : 'locate-outline'} size={22} color={hasFix ? '#2196F3' : '#AAA'} />
+      </TouchableOpacity>
 
       {/* FAB — Add Spot (hidden during active session) */}
       {!session && (
@@ -598,6 +740,7 @@ export default function MapScreen() {
         allSpots={spots}
         userLat={coordinate.latitude}
         userLng={coordinate.longitude}
+        hasLocation={hasFix}
         expanded={expandedSpotId === selectedSpot?.id}
         onExpand={handleExpand}
         onParkHere={handleParkHere}
@@ -661,26 +804,6 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     gap: 8,
-  },
-  appNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(26,26,26,0.92)',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  appName: {
-    color: '#00C853',
-    fontWeight: '800',
-    fontSize: 18,
-    letterSpacing: 0.5,
-    flex: 1,
   },
   errorChip: {
     flexDirection: 'row',
@@ -787,6 +910,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   // ── FAB ─────────────────────────────────────────────────────────────────────
+  glanceCard: {
+    position: 'absolute',
+    left: 16,
+    right: 92,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(26,26,26,0.96)',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,230,118,0.35)',
+    elevation: 8,
+  },
+  glanceDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#00E676',
+  },
+  glanceTitle: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  glanceSub: {
+    color: '#AAA',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  locateBtn: {
+    position: 'absolute',
+    right: 24,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(26,26,26,0.95)',
+    borderWidth: 1,
+    borderColor: '#333',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+  },
   fab: {
     position: 'absolute',
     right: 20,

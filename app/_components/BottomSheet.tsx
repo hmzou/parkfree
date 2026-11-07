@@ -73,6 +73,11 @@ const RulePanel: React.FC<{ rule: RuleVerdict; now: Date }> = ({ rule, now }) =>
   );
 };
 
+/** "350 m" or "1.4 km" */
+function formatDistance(m: number): string {
+  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -80,6 +85,8 @@ interface Props {
   allSpots: ParkingSpot[];
   userLat: number;
   userLng: number;
+  /** False while the position is only the downtown fallback: distances would be fiction */
+  hasLocation?: boolean;
   /** True once the user has tapped the same pin a second time (or "See options"). */
   expanded: boolean;
   onExpand: () => void;
@@ -105,6 +112,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
   allSpots,
   userLat,
   userLng,
+  hasLocation = true,
   expanded,
   onExpand,
   onParkHere,
@@ -213,7 +221,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
     ? Math.floor((Date.now() - spot.occupiedSince.getTime()) / 60_000)
     : null;
 
-  const distanceMeters = spot
+  const distanceMeters = spot && hasLocation
     ? haversineMeters(userLat, userLng, spot.lat, spot.lng)
     : Infinity;
   const canPark = distanceMeters <= 150;
@@ -271,7 +279,7 @@ export const SpotBottomSheet: React.FC<Props> = ({
               </Text>
             </View>
             <View style={styles.peekRight}>
-              <Text style={styles.peekDist}>{Math.round(distanceMeters)}m</Text>
+              {hasLocation && <Text style={styles.peekDist}>{formatDistance(distanceMeters)}</Text>}
               {snapIndex === 0 && (
                 <Ionicons name="chevron-up" size={16} color="#00C853" />
               )}
@@ -493,7 +501,9 @@ export const SpotBottomSheet: React.FC<Props> = ({
                         <View style={styles.tooFarRow}>
                           <Ionicons name="location-outline" size={16} color="#666" />
                           <Text style={styles.tooFarText}>
-                            {t('actions.tooFar', { distance: Math.round(distanceMeters) })}
+                            {hasLocation
+                              ? t('actions.tooFar', { distance: Math.round(distanceMeters) })
+                              : t('actions.needLocation')}
                           </Text>
                         </View>
                       )
